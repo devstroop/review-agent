@@ -1,0 +1,31 @@
+# Review-Agent configuration
+# Env vars override these values:
+#   AI_API_KEY   → ai.api_key
+#   AI_API_BASE  → ai.api_base
+#   MODEL        → ai.model
+#   GITHUB_TOKEN → github.token
+#
+# Config search order:
+#   1. $GITHUB_WORKSPACE/.github/review-agent.toml
+#   2. $CWD/review-agent.toml
+#   3. $CWD/.review-agent.toml
+#   4. ~/.config/review-agent/config.toml
+#   5. Built-in defaults
+
+[ai]
+api_base = "https://ai.cloudmagic.io/v1"
+model = "glm-4.6"
+# api_key is required — set via AI_API_KEY env var
+request_timeout_secs = 120
+temperature = 0.2
+max_completion_tokens = 4096
+
+[github]
+# token is required — set via GITHUB_TOKEN env var
+request_timeout_secs = 30
+max_concurrent_requests = 10
+
+[review]
+max_input_tokens = 16000
+max_diff_files = 50
+extra_instructions = ""
