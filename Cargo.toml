@@ -1,0 +1,47 @@
+[package]
+name = "review-agent"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Config
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+shellexpand = "3"
+
+# Async runtime
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
+
+# HTTP
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Rate limiting
+governor = "0.7"
+
+# Retry
+backoff = { version = "0.4", features = ["tokio"] }
+
+# Diff parsing
+similar = "2"
+
+# URL parsing
+url = "2"
+
+[dev-dependencies]
+wiremock = "0.6"
+tempfile = "3"
+temp-env = "0.3"
