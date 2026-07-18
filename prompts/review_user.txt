@@ -1,0 +1,21 @@
+## PR: {title}
+
+**Repository:** {owner}/{repo}
+**Author:** {author}
+**Branch:** {branch} → {base}
+**Language:** {language}
+**Description:** {description}
+
+---
+
+### Files Changed ({total_files})
+
+{file_list}
+
+---
+
+### Diff
+
+```
+{diff}
+```
