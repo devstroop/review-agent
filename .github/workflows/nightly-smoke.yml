@@ -1,0 +1,34 @@
+# Nightly smoke test against a real PR on the eatery test repo.
+# This is the only CI job that requires network access and real credentials.
+# It is NOT run on PRs — only on schedule or manual dispatch.
+name: Nightly Smoke Test
+on:
+  schedule:
+    - cron: "0 6 * * *" # daily 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build
+
+      - name: Smoke test — review a real PR
+        run: |
+          cargo run -- review \
+            --pr-url https://github.com/devstroop/eatery/pull/157
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_API_BASE: ${{ secrets.AI_API_BASE }}
+          MODEL: ${{ secrets.MODEL }}
