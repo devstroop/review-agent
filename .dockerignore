@@ -1,0 +1,34 @@
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# CI / workflows (not needed at runtime)
+.github/
+
+# Documentation
+*.md
+LICENSE
+AGENTS.md
+DECISIONS.md
+SECURITY.md
+CONTRIBUTING.md
+PLAN.md
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+target/
+**/*.rs.bk
+
+# Worktrees (other branches)
+review-agent.worktrees/
