@@ -36,6 +36,43 @@ pub enum AgentError {
     InvalidUrl(String),
 }
 
+impl AgentError {
+    /// Returns `true` if the error is transient and retryable.
+    ///
+    /// Transient errors include:
+    /// - HTTP 429 (rate limit)
+    /// - HTTP 5xx (server errors)
+    /// - Connection timeouts / `reqwest::Error`
+    ///
+    /// Detection strategy:
+    /// - GitHub errors: checked via known prefix strings from the GitHub API error formatter
+    ///   (e.g. "GitHub API transient error (5", "GitHub API error (429)")
+    /// - AI errors: checked via known prefix strings from the AI API error formatter
+    ///   (e.g. "AI API rate limit exceeded (429)", "AI API server error (5")
+    /// - `Timeout` and `Http` variants are always transient.
+    ///
+    /// # Contract
+    /// The AI/GitHub string prefixes below are coupled to the `classify_error`
+    /// formatters in `src/ai/mod.rs` and `src/github/mod.rs`. If those formatters
+    /// change their prefixes, this method must be updated in lockstep.
+    pub(crate) fn is_transient(&self) -> bool {
+        match self {
+            Self::GitHub(msg) => {
+                msg.starts_with("GitHub API transient error")
+                    || msg.starts_with("GitHub API rate limit exceeded")
+                    || msg.starts_with("GitHub API error (5")
+                    || msg.starts_with("GitHub API error (429)")
+            }
+            Self::Ai(msg) => {
+                msg.starts_with("AI API rate limit exceeded (429)")
+                    || msg.starts_with("AI API server error (5")
+            }
+            Self::Timeout(_) | Self::Http(_) => true,
+            _ => false,
+        }
+    }
+}
+
 pub type Result<T> = std::result::Result<T, AgentError>;
 
 #[cfg(test)]
