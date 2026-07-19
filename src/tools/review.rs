@@ -139,6 +139,15 @@ impl ReviewTool {
         let branch = &pr.head.r#ref;
         let base = &pr.base.r#ref;
 
+        let extra = if self.settings.review.extra_instructions.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "### Additional Instructions\n\n{}\n",
+                self.settings.review.extra_instructions
+            )
+        };
+
         let prompt = USER_TEMPLATE
             .replace("{title}", &pr.title)
             .replace("{owner}", owner)
@@ -150,6 +159,7 @@ impl ReviewTool {
             .replace("{description}", &description)
             .replace("{total_files}", &files.len().to_string())
             .replace("{file_list}", &file_list)
+            .replace("{extra_instructions}", &extra)
             .replace("{diff}", &diff_context);
 
         Ok(prompt)

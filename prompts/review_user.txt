@@ -12,6 +12,8 @@
 
 {file_list}
 
+{extra_instructions}
+
 ---
 
 ### Diff
