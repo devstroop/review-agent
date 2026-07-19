@@ -1,9 +1,10 @@
 //! Unified error types for all review-agent operations.
 //!
 //! [`AgentError`] is the single error enum used across every module. Each
-//! variant carries a human-readable message via `thiserror`. The [`is_transient`]
-//! method distinguishes retryable errors (rate limits, server errors, timeouts)
-//! from permanent failures (config errors, parse errors, bad URLs).
+//! variant carries a human-readable message via `thiserror`. The
+//! `AgentError::is_transient()` distinguishes retryable errors (rate
+//! limits, server errors, timeouts) from permanent failures (config errors,
+//! parse errors, bad URLs).
 //!
 //! [`Result<T>`] is a convenience alias over `std::result::Result<T, AgentError>`.
 
@@ -15,7 +16,7 @@ use thiserror::Error;
 /// `#[error("...")]` attribute) or transparently delegates to an underlying
 /// error type via `#[from]`.
 ///
-/// Use [`is_transient()`](AgentError::is_transient) to determine whether an
+/// Use `is_transient()` to determine whether an
 /// error is safe to retry.
 #[derive(Error, Debug)]
 pub enum AgentError {
@@ -28,14 +29,14 @@ pub enum AgentError {
     /// A GitHub API error — non-transient 4xx response (e.g. 404, 403).
     ///
     /// Transient GitHub errors (429, 5xx) are identified by message prefix
-    /// in [`is_transient()`](AgentError::is_transient).
+    /// in `is_transient()`.
     #[error("GitHub API error: {0}")]
     GitHub(String),
 
     /// An AI API error — non-transient error from the chat endpoint.
     ///
     /// Transient AI errors (429, 5xx) are identified by message prefix
-    /// in [`is_transient()`](AgentError::is_transient).
+    /// in `is_transient()`.
     #[error("AI API error: {0}")]
     Ai(String),
 
