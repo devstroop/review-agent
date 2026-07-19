@@ -14,7 +14,7 @@ src/diff.rs      — diff parser via diffy crate; binary files auto-skipped (don
 src/tokens.rs    — (len*2)/7 token heuristic; safe margin overestimates tokens (done)
 src/language.rs  — extension→language lookup via sorted slice + Path::extension() (done)
 src/ai/          — OpenAI-compatible chat client; 90s timeout × 4 attempts ~7 min max (done)
-src/tools/       — review orchestrator (in progress)
+src/tools/       — review orchestrator (done)
 prompts/         — system/user prompt templates
 ```
 
@@ -44,4 +44,4 @@ prompts/         — system/user prompt templates
 
 ## Current State
 
-Phase 1, 2, 3, 4 done. Next: Phase 5 (src/tools/review.rs). See DECISIONS.md for full breakdown.
+Phase 1, 2, 3, 4, 5 done. Next: Phase 6 (CLI wiring — partially done). See DECISIONS.md for full breakdown.
