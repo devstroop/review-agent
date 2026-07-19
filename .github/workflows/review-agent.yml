@@ -34,8 +34,12 @@ jobs:
       - name: Run review-agent
         uses: ./
         with:
-          # Only needed if not running inside a PR context (local dev).
-          # pr_url: 'https://github.com/owner/repo/pull/123'
+          # pr_url construction assumes a pull_request event (the trigger above
+          # is restricted to pull_request, and the job guard checks for PR
+          # context). The || '' is defense-in-depth — if the event has no PR
+          # number, the binary's parse_pr_url() will reject the malformed URL
+          # with a clear error message.
+          pr_url: ${{ format('https://github.com/{0}/{1}/pull/{2}', github.repository_owner, github.event.repository.name, github.event.pull_request.number || '') }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           ai_api_key: ${{ secrets.AI_API_KEY }}
         env:
