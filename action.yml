@@ -1,0 +1,62 @@
+# review-agent — GitHub Action
+#
+# Runs the review-agent binary inside a Docker container built from the
+# repo's Dockerfile (multi-stage, distroless/static base).
+#
+# Usage:
+#   - uses: devstroop/review-agent@v0.1.0
+#     with:
+#       github_token: ${{ secrets.GITHUB_TOKEN }}
+#       ai_api_key: ${{ secrets.AI_API_KEY }}
+#     env:
+#       AI_API_BASE: ${{ secrets.AI_API_BASE }}
+#       MODEL: ${{ secrets.MODEL }}
+
+name: 'review-agent'
+description: 'AI-powered PR review agent — analyzes pull requests using any OpenAI-compatible endpoint'
+author: 'devstroop'
+branding:
+  icon: 'check-circle'
+  color: 'green'
+
+inputs:
+  pr_url:
+    description: 'Pull request URL to review (auto-detected in GitHub Actions context)'
+    required: false
+    default: ''
+  github_token:
+    description: 'GitHub token with contents:read and pull-requests:write permissions'
+    required: false
+    default: ''
+  ai_api_key:
+    description: 'API key for the OpenAI-compatible AI endpoint'
+    required: true
+  ai_api_base:
+    description: 'Base URL for the OpenAI-compatible AI endpoint'
+    required: false
+    default: 'https://ai.cloudmagic.io/v1'
+  model:
+    description: 'AI model name to use for review'
+    required: false
+    default: 'glm-4.6'
+
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+  args:
+    - review
+    - --pr-url
+    - >-
+      ${{
+        inputs.pr_url ||
+        format('https://github.com/{0}/{1}/pull/{2}',
+          github.repository_owner,
+          github.event.repository.name,
+          github.event.pull_request.number)
+      }}
+  env:
+    GITHUB_TOKEN: ${{ inputs.github_token || github.token }}
+    AI_API_KEY: ${{ inputs.ai_api_key }}
+    AI_API_BASE: ${{ inputs.ai_api_base }}
+    MODEL: ${{ inputs.model }}
+    LOG_FORMAT: json
