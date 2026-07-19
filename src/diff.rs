@@ -156,13 +156,14 @@ fn parse_single_file(section: &str) -> Result<Option<DiffFile>> {
         let old_filename = extract_old_filename(header);
         // Capture mode lines (e.g. `new file mode 100644`) so filter_files
         // keeps the file — without hunks or mode metadata it would be dropped.
+        // Use starts_with because git mode lines always begin at column 0.
         let mode_lines: Vec<&str> = header
             .lines()
             .filter(|l| {
-                l.contains("old mode")
-                    || l.contains("new mode")
-                    || l.contains("new file mode")
-                    || l.contains("deleted file mode")
+                l.starts_with("old mode")
+                    || l.starts_with("new mode")
+                    || l.starts_with("new file mode")
+                    || l.starts_with("deleted file mode")
             })
             .collect();
         let mode_change = if mode_lines.is_empty() {
@@ -186,19 +187,22 @@ fn parse_single_file(section: &str) -> Result<Option<DiffFile>> {
     // them explicitly and preserve the mode metadata for the AI. Only treat as
     // mode-only when there are no `@@` hunks — files that also carry content
     // changes must fall through to the normal diffy parsing path.
-    if (header.contains("old mode")
-        || header.contains("new file mode")
-        || header.contains("deleted file mode"))
-        && !section.contains("@@ ")
+    // Use line-level starts_with checks because git mode lines always begin at
+    // column 0, and contains can false-positive on filenames or other headers.
+    if header.lines().any(|l| {
+        l.starts_with("old mode")
+            || l.starts_with("new file mode")
+            || l.starts_with("deleted file mode")
+    }) && !section.contains("@@ ")
     {
         if let Some(filename) = extract_filename_from_diff_git(section) {
             let mode_lines: Vec<&str> = header
                 .lines()
                 .filter(|l| {
-                    l.contains("old mode")
-                        || l.contains("new mode")
-                        || l.contains("new file mode")
-                        || l.contains("deleted file mode")
+                    l.starts_with("old mode")
+                        || l.starts_with("new mode")
+                        || l.starts_with("new file mode")
+                        || l.starts_with("deleted file mode")
                 })
                 .collect();
             let status = detect_status(header, None, None);
@@ -222,6 +226,8 @@ fn parse_single_file(section: &str) -> Result<Option<DiffFile>> {
     // relevant and must not be dropped. Only treat as pure rename/copy when
     // there are no `@@` hunks — renames that also carry content changes must
     // fall through to the normal diffy parsing path.
+    // Use starts_with for mode line matching — git mode lines always begin at
+    // column 0, and contains can false-positive on filenames or other headers.
     if (header.contains("rename from")
         || header.contains("copy from")
         || header.contains("rename to")
@@ -234,10 +240,10 @@ fn parse_single_file(section: &str) -> Result<Option<DiffFile>> {
             let mode_lines: Vec<&str> = header
                 .lines()
                 .filter(|l| {
-                    l.contains("old mode")
-                        || l.contains("new mode")
-                        || l.contains("new file mode")
-                        || l.contains("deleted file mode")
+                    l.starts_with("old mode")
+                        || l.starts_with("new mode")
+                        || l.starts_with("new file mode")
+                        || l.starts_with("deleted file mode")
                 })
                 .collect();
             let mode_change = if mode_lines.is_empty() {
@@ -257,11 +263,12 @@ fn parse_single_file(section: &str) -> Result<Option<DiffFile>> {
         }
     }
 
-    // Trim trailing newlines before passing to diffy. The section may include
-    // a trailing blank line from the inter-file gap in a multi-file diff, and
-    // diffy treats that blank line as an extra hunk line, causing a
-    // "Hunk header does not match hunk" error.
-    let section = section.trim_end_matches('\n');
+    // Remove the trailing blank line from the inter-file gap before passing to
+    // diffy. Multi-file diffs separate each file with a blank line, and diffy
+    // treats that extra line as an orphan hunk line, causing a "Hunk header does
+    // not match hunk" error. Use strip_suffix("\n") to remove at most one
+    // newline — trimming all trailing newlines would break the last hunk line.
+    let section = section.strip_suffix("\n").unwrap_or(section);
 
     let patch = match Patch::from_str(section) {
         Ok(p) => p,
