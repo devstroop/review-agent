@@ -40,6 +40,7 @@ diffy = "0.4"
 
 # URL parsing
 url = "2"
+percent-encoding = "2"
 
 [dev-dependencies]
 wiremock = "0.6"
