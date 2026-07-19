@@ -85,7 +85,9 @@ impl ReviewTool {
         let input_tokens_estimated = estimate_tokens(&user_prompt);
 
         // 7. Call the AI.
-        let review_text = self.ai.chat(SYSTEM_PROMPT, &user_prompt).await?;
+        let chat_output = self.ai.chat(SYSTEM_PROMPT, &user_prompt).await?;
+        let review_text = chat_output.content;
+        let output_tokens_reported = chat_output.usage.as_ref().and_then(|u| u.completion_tokens);
 
         // 8. Post the review as a comment.
         let review = self
@@ -115,7 +117,7 @@ impl ReviewTool {
             files_skipped,
             total_tokens_used: input_tokens_estimated,
             input_tokens_estimated,
-            output_tokens_reported: None,
+            output_tokens_reported,
             latency_ms,
         })
     }
