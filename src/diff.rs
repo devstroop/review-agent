@@ -154,6 +154,22 @@ fn parse_single_file(section: &str) -> Result<Option<DiffFile>> {
         // For renames/copies capture the original name so the formatted output
         // shows the full a/old b/new path even for binaries.
         let old_filename = extract_old_filename(header);
+        // Capture mode lines (e.g. `new file mode 100644`) so filter_files
+        // keeps the file — without hunks or mode metadata it would be dropped.
+        let mode_lines: Vec<&str> = header
+            .lines()
+            .filter(|l| {
+                l.contains("old mode")
+                    || l.contains("new mode")
+                    || l.contains("new file mode")
+                    || l.contains("deleted file mode")
+            })
+            .collect();
+        let mode_change = if mode_lines.is_empty() {
+            None
+        } else {
+            Some(mode_lines.join("\n"))
+        };
         return Ok(Some(DiffFile {
             filename,
             old_filename,
@@ -161,7 +177,7 @@ fn parse_single_file(section: &str) -> Result<Option<DiffFile>> {
             hunks: Vec::new(),
             additions: 0,
             deletions: 0,
-            mode_change: None,
+            mode_change,
         }));
     }
 
@@ -240,6 +256,12 @@ fn parse_single_file(section: &str) -> Result<Option<DiffFile>> {
             }));
         }
     }
+
+    // Trim trailing newlines before passing to diffy. The section may include
+    // a trailing blank line from the inter-file gap in a multi-file diff, and
+    // diffy treats that blank line as an extra hunk line, causing a
+    // "Hunk header does not match hunk" error.
+    let section = section.trim_end_matches('\n');
 
     let patch = match Patch::from_str(section) {
         Ok(p) => p,

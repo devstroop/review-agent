@@ -11,3 +11,4 @@ pub mod tools;
 
 pub use config::Settings;
 pub use error::{AgentError, Result};
+pub use sensitive::Sensitive;

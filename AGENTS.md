@@ -48,4 +48,15 @@ action.yml       — GitHub Action metadata (Docker strategy) (done)
 
 ## Current State
 
-Phase 1, 2, 3, 4, 5 done. Next: Phase 6 (CLI wiring — partially done). See DECISIONS.md for full breakdown.
+All phases complete. **113 tests pass**, 0 fail, 0 warnings (`cargo clippy -D warnings` clean).
+
+| Phase | What | Status |
+|-------|------|--------|
+| 1 | Foundation (config, error, sensitive, logging, CLI, CI) | ✅ `master` |
+| 2 | GitHub Client (reqwest, rate-limit, retry) | ✅ PR #1 → `master` |
+| 3 | Diff Parser, Token Manager, Language Detection | ✅ `master` |
+| 4 | AI Client (OpenAI-compatible, timeout, retry) | ✅ `master` |
+| 5 | Review Orchestrator (`tools/review.rs`) | ✅ `master` |
+| 6 | E2E Integration Tests (wiremock, 8 integration tests) | ✅ `master` |
+| 7 | Docker & Release (Dockerfile, action.yml, release.yml, nightly smoke) | ✅ `master` |
+| 8 | Documentation & Polish (README, AGENTS.md, CONTRIBUTING.md) | ✅ `master` |
