@@ -17,14 +17,14 @@
 //! | `binary_file_handling` | Binary-only diff is handled (kept, but no hunks) |
 //! | `max_files_cap` | Diff with 60 files is trimmed to max_diff_files (50) |
 
-use review_agent::Settings;
 use review_agent::Sensitive;
+use review_agent::Settings;
 use review_agent::tools::review::ReviewTool;
+use serde_json::json;
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
-    matchers::{method, path, header},
+    matchers::{header, method, path},
 };
-use serde_json::json;
 
 // ──────────────────────────────────────────────
 // Helpers
@@ -304,7 +304,10 @@ async fn file_skip_list_filters_lockfiles() {
     let output = tool.run("owner", "repo", 3).await.unwrap();
 
     assert_eq!(output.files_changed, 3);
-    assert_eq!(output.files_reviewed, 1, "Lockfile + minified file should be skipped");
+    assert_eq!(
+        output.files_reviewed, 1,
+        "Lockfile + minified file should be skipped"
+    );
     assert_eq!(output.files_skipped, 2);
 
     github_mock.verify().await;
@@ -357,7 +360,10 @@ async fn binary_file_handling_keeps_metadata() {
 
     // Binary files are kept (not dropped) — the file is visible but has no hunks
     assert_eq!(output.files_changed, 1);
-    assert_eq!(output.files_reviewed, 1, "Binary file should be kept for context");
+    assert_eq!(
+        output.files_reviewed, 1,
+        "Binary file should be kept for context"
+    );
     assert_eq!(output.files_skipped, 0);
 
     github_mock.verify().await;
