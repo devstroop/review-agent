@@ -14,8 +14,10 @@ src/diff.rs      — diff parser via diffy crate; binary files auto-skipped (don
 src/tokens.rs    — (len*2)/7 token heuristic; safe margin overestimates tokens (done)
 src/language.rs  — extension→language lookup via sorted slice + Path::extension() (done)
 src/ai/          — OpenAI-compatible chat client; 90s timeout × 4 attempts ~7 min max (done)
-src/tools/       — review orchestrator (in progress)
+src/tools/       — review orchestrator (in progress — feat/review-tool)
 prompts/         — system/user prompt templates
+Dockerfile       — multi-stage Docker build (musl static → distroless/static) (done)
+action.yml       — GitHub Action metadata (Docker strategy) (done)
 ```
 
 ## Conventions
@@ -30,7 +32,9 @@ prompts/         — system/user prompt templates
 - **HTTP**: single `reqwest::Client` with rustls-tls. Headers: `User-Agent: review-agent`, `Accept: application/vnd.github.v3.diff`.
 - **Logging**: `tracing` — JSON when `LOG_FORMAT=json`. Secrets redacted at type level.
 - **Tests**: `wiremock` for HTTP mocking. No network in CI.
-- **Docker**: Static link with `+crt-static`, `gcr.io/distroless/static` base image (ADR-018).
+- **Docker**: Static link via `x86_64-unknown-linux-musl` target, `gcr.io/distroless/static` base image (ADR-018).
+- **Action**: `action.yml` with Docker strategy — auto-detects PR URL from `github.event.pull_request`.
+- **Release**: GHCR publish + GitHub Release on `v*` tags, SBOM generation.
 - **Observability**: Step summary table via `$GITHUB_STEP_SUMMARY` — PR size, tokens, latency, model (ADR-020).
 - **MSRV**: 1.85. Edition 2024.
 - **Style**: `cargo fmt`, `cargo clippy` clean, `default-features=false` on deps.
@@ -44,4 +48,10 @@ prompts/         — system/user prompt templates
 
 ## Current State
 
-Phase 1, 2, 3, 4 done. Next: Phase 5 (src/tools/review.rs). See DECISIONS.md for full breakdown.
+| Phase | What | Status |
+|---|---|---|
+| 1–4 | Scaffold, config, error, sensitive, logging, CLI, CI, GitHub client, diff parser, token manager, language detection, AI client | ✅ Done |
+| 5 | Review tool orchestrator (`src/tools/review.rs`) | 🏗️ `feat/review-tool` worktree |
+| 6 | CLI wiring (parse_pr_url, ReviewTool integration) | 🏗️ `feat/review-tool` worktree |
+| **7** | **Docker & Action (Dockerfile, action.yml, .dockerignore, release workflow)** | ✅ **Done** (this branch) |
+| 8 | CI polish (badges, release automation) | ⬜ Next
