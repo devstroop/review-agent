@@ -3,12 +3,12 @@ pub use types::*;
 
 use crate::config::Settings;
 use crate::error::{AgentError, Result};
-use backoff::backoff::Backoff;
 use backoff::ExponentialBackoff;
+use backoff::backoff::Backoff;
 use governor::clock::DefaultClock;
 use governor::state::{InMemoryState, NotKeyed};
 use governor::{Quota, RateLimiter};
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT};
+use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
 use reqwest::{Client, StatusCode};
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -52,10 +52,7 @@ impl GitHub {
         let token = settings.github.token.clone();
 
         let mut headers = HeaderMap::new();
-        headers.insert(
-            USER_AGENT,
-            HeaderValue::from_static("review-agent/0.1.0"),
-        );
+        headers.insert(USER_AGENT, HeaderValue::from_static("review-agent/0.1.0"));
         headers.insert(
             ACCEPT,
             HeaderValue::from_static("application/vnd.github.v3+json"),
@@ -120,12 +117,7 @@ impl GitHub {
     }
 
     /// Fetch the list of files changed in a pull request.
-    pub async fn get_pr_files(
-        &self,
-        owner: &str,
-        repo: &str,
-        number: u64,
-    ) -> Result<Vec<PrFile>> {
+    pub async fn get_pr_files(&self, owner: &str, repo: &str, number: u64) -> Result<Vec<PrFile>> {
         let url = format!(
             "{}/repos/{}/{}/pulls/{}/files",
             self.api_base, owner, repo, number
@@ -182,10 +174,7 @@ impl GitHub {
 
     /// Fetch the language breakdown for a repository.
     pub async fn get_languages(&self, owner: &str, repo: &str) -> Result<LanguageBreakdown> {
-        let url = format!(
-            "{}/repos/{}/{}/languages",
-            self.api_base, owner, repo
-        );
+        let url = format!("{}/repos/{}/{}/languages", self.api_base, owner, repo);
         self.get_json(&url).await
     }
 
