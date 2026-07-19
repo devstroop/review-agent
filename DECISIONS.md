@@ -396,3 +396,49 @@ ExponentialBackoffBuilder::new()
 - + Dropping largest-first preserves many small-but-impactful changes while shedding massive generated diffs
 - − **Caveat:** The largest file may be the core PR change. On very large PRs, the AI might miss the most important file. Accepted v1 trade-off in favor of breadth.
 - − Users can raise `max_input_tokens` (default 16,000) if they need deeper coverage
+
+---
+
+## Implementation Status
+
+All 23 ADRs are implemented in the current codebase. Key implementation files:
+
+| ADR | Module | Key file |
+|-----|--------|----------|
+| 001 (Rust) | — | `Cargo.toml`, `Dockerfile` |
+| 002 (One tool/host/provider) | `tools/review.rs` | One tool, one GitHub client, generic AI |
+| 003 (Raw markdown) | `tools/review.rs` → `github/mod.rs` | AI output posted as-is |
+| 004 (TOML + env) | `config.rs` | `Settings::load()` |
+| 005 (Diff parsing via `diffy`) | `diff.rs` | `parse_diff()` |
+| 006 (3.5 chars/token) | `tokens.rs` | `estimate_tokens()` |
+| 007 (Sensitive\<T\>) | `sensitive.rs` | `Sensitive<T>` wrapper |
+| 008 (Semaphore + governor) | `github/mod.rs` | `GitHub::new()` |
+| 009 (90s AI timeout) | `ai/mod.rs` | `AiClient::chat()` |
+| 010 (Bot detection) | `.github/workflows/review-agent.yml` | `sender.type != 'Bot'` |
+| 011 (Full PR diff) | `tools/review.rs` | Cumulative `get_pr_diff()` |
+| 012 (File skip-list) | `diff.rs` | `filter_files()` |
+| 013 (MSRV 1.85, edition 2024) | `Cargo.toml` | `rust-version = "1.85"` |
+| 014 (MIT License) | `LICENSE` | — |
+| 015 (Backoff + jitter) | `github/mod.rs`, `ai/mod.rs` | `ExponentialBackoff` |
+| 016 (No dedup in v1) | `tools/review.rs` | No comment-tracking logic |
+| 017 (No GitProvider trait) | `github/mod.rs` | Concrete `GitHub` struct |
+| 018 (Static linking) | `Dockerfile` | `+crt-static`, `distroless/static` |
+| 019 (Event filtering) | `main.rs` | Bot/draft/no-op filters |
+| 020 (Step summary) | `main.rs` | `GITHUB_STEP_SUMMARY` output |
+| 021 (diffy over similar) | `diff.rs` | `diffy::Patch::from_str()` |
+| 022 (Sorted slice lookup) | `language.rs` | `LANGUAGES` + `binary_search_by_key` |
+| 023 (Drop files, not hunks) | `tokens.rs` | `truncate_to_budget()` |
+
+---
+
+## v2 Candidates (not yet ADR'd)
+
+Features deferred from v1 that may return as formal ADRs:
+
+- **Inline code suggestions** — line-anchored comments on specific diff hunks
+- **Incremental reviews** — track commit SHA, only review new changes
+- **Idempotent comment updates** — find + edit prior review comment instead of posting new one
+- **Structured YAML output** — enable "Apply suggestion" buttons
+- **Multi-provider** — GitLab, Bitbucket, Azure DevOps (requires ADR-017 reversal)
+- **Webhook server** — real-time processing via `serve` subcommand
+- **Accurate token counting** — `tiktoken-rs` (now pure Rust)
