@@ -1,9 +1,9 @@
 name: CI
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 env:
   CARGO_TERM_COLOR: always
@@ -12,7 +12,7 @@ jobs:
   quality:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
@@ -31,5 +31,9 @@ jobs:
       - name: Test
         run: cargo test
 
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
       - name: Audit
-        uses: actions-rust-lang/audit@v4
+        run: cargo audit

@@ -49,11 +49,12 @@ impl AiClient {
         })
     }
 
-    /// Send a chat completion request and return the response text.
+    /// Send a chat completion request and return the response text with
+    /// optional token usage.
     ///
     /// The system message sets the AI's behavior, and the user message
     /// contains the PR diff + metadata to review.
-    pub async fn chat(&self, system: &str, user: &str) -> Result<String> {
+    pub async fn chat(&self, system: &str, user: &str) -> Result<ChatOutput> {
         let url = format!("{}/chat/completions", self.api_base.trim_end_matches('/'));
 
         let request = ChatRequest {
@@ -113,7 +114,10 @@ impl AiClient {
                             .next()
                             .and_then(|c| c.message.content)
                             .unwrap_or_default();
-                        Ok(content)
+                        Ok(ChatOutput {
+                            content,
+                            usage: chat_resp.usage,
+                        })
                     } else {
                         let text = resp.text().await.unwrap_or_default();
                         Err(classify_error(status, &text))

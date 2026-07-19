@@ -20,6 +20,16 @@ pub struct Message {
     pub content: String,
 }
 
+/// Result returned by `AiClient::chat`, combining the response text with
+/// optional token-usage information.
+#[derive(Debug, Clone)]
+pub struct ChatOutput {
+    /// The text content of the model's response.
+    pub content: String,
+    /// Token usage reported by the API, if available.
+    pub usage: Option<Usage>,
+}
+
 /// Response from the OpenAI-compatible chat completions endpoint.
 #[derive(Debug, Deserialize)]
 pub struct ChatResponse {
@@ -39,7 +49,7 @@ pub struct ChoiceMessage {
     pub content: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Usage {
     pub prompt_tokens: Option<u32>,
     pub completion_tokens: Option<u32>,
