@@ -76,11 +76,25 @@ impl GitHub {
         let quota = Quota::per_second(NonZeroU32::new(2).unwrap());
         let rate_limiter = Arc::new(RateLimiter::direct(quota));
 
+        // Validate the custom API base URL if one was provided.
+        let api_base = if settings.github.base_url.is_empty() {
+            GITHUB_API_BASE.to_string()
+        } else {
+            let trimmed = settings.github.base_url.trim_end_matches('/');
+            url::Url::parse(trimmed).map_err(|e| {
+                AgentError::Config(format!(
+                    "Invalid github.base_url '{}': {}",
+                    settings.github.base_url, e
+                ))
+            })?;
+            trimmed.to_string()
+        };
+
         Ok(Self {
             client,
             semaphore,
             rate_limiter,
-            api_base: GITHUB_API_BASE.to_string(),
+            api_base,
         })
     }
 
