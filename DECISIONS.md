@@ -345,3 +345,54 @@ ExponentialBackoffBuilder::new()
 - + Excellent visibility for users, trivial debugging for maintainers
 - + No external metrics backend required
 - − Step summary has a size limit; very large PRs may truncate the table
+
+---
+
+## ADR-021: Diff Parsing via `diffy` Crate (Not `similar`)
+
+**Status:** Accepted | **Date:** 2026-07-19
+
+**Context:** GitHub's raw diff endpoint (`Accept: application/vnd.github.v3.diff`) returns a standard multi-file unified diff string. We need to parse this into structured `DiffFile`/`Hunk`/`DiffLine` types. A naive first design proposed `similar::ChangeTag`, but `similar` *computes* diffs between two strings — it does **not** parse unified diff text. Feeding a unified diff string into `similar` treats it as plain text.
+
+**Decision:** Use the `diffy` crate (`diffy::Patch::from_str`) for parsing. It is purpose-built for unified diff parsing and handles all standard edge cases natively: `---`/`+++` headers, `@@` hunk ranges, `Binary files differ`, `rename from`/`rename to`, `new file mode`, `deleted file mode`, and `\ No newline at end of file`. For multi-file GitHub diffs, we split on `diff --git a/x b/y` boundaries and parse each section independently.
+
+**Consequences:**
+- + Correct by construction — `diffy` is a battle-tested unified-diff parser
+- + Handles rename/new/deleted/binary edge cases without custom logic
+- + One small dependency (`diffy = "0.4"`)
+- − `diffy`'s `Patch` API is single-file; we must split multi-file diffs manually before parsing
+- − `diffy` does not preserve GitHub's `diff --git` metadata (we re-derive filename from `modified()`/`original()` and status from mode lines)
+- − `similar` crate removed from `Cargo.toml` — confirmed unused after switching to `diffy`
+
+---
+
+## ADR-022: Language Detection via Sorted Slice (Not `phf`)
+
+**Status:** Accepted | **Date:** 2026-07-19
+
+**Context:** The AI prompt benefits from knowing the programming language of each changed file. A lookup table mapping file extensions to language names is needed.
+
+**Decision:** Use a static sorted slice of `(extension, language)` pairs with `binary_search_by_key` for `O(log n)` lookups. Extension extraction uses `Path::extension()` (handles `.spec.ts` → "ts" naturally). Extensionless files like `Dockerfile` are matched by basename first.
+
+**Consequences:**
+- + Zero dependencies — no `phf` crate needed for ~40 entries
+- + `binary_search_by_key` is fast (≤6 comparisons for 40 entries)
+- + Simple to extend — add a tuple, keep the slice sorted
+- − Not compile-time perfect hashing (irrelevant at this scale)
+- − No file-content sniffing (v1 simplicity over accuracy)
+
+---
+
+## ADR-023: Truncation Drops Files (Not Hunks), Largest First
+
+**Status:** Accepted | **Date:** 2026-07-19
+
+**Context:** When a PR's diff exceeds the token budget, we must truncate. The question is at what granularity: file, hunk, or line?
+
+**Decision:** Truncate at the **file level**, dropping the **largest files first** (by estimated tokens) until the total fits `max_input_tokens`. Never split a hunk or a file mid-way.
+
+**Consequences:**
+- + A partial file review provides misleading signal — reviewing fewer complete files is better
+- + Dropping largest-first preserves many small-but-impactful changes while shedding massive generated diffs
+- − **Caveat:** The largest file may be the core PR change. On very large PRs, the AI might miss the most important file. Accepted v1 trade-off in favor of breadth.
+- − Users can raise `max_input_tokens` (default 16,000) if they need deeper coverage

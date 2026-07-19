@@ -36,7 +36,7 @@ governor = "0.7"
 backoff = { version = "0.4", features = ["tokio"] }
 
 # Diff parsing
-similar = "2"
+diffy = "0.4"
 
 # URL parsing
 url = "2"

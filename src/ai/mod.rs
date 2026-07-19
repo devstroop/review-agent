@@ -4,10 +4,10 @@ pub use types::*;
 use crate::config::Settings;
 use crate::error::{AgentError, Result};
 use crate::sensitive::Sensitive;
-use backoff::backoff::Backoff;
 use backoff::ExponentialBackoff;
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
+use backoff::backoff::Backoff;
 use reqwest::Client;
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use std::time::Duration;
 use tracing::warn;
 
@@ -31,10 +31,7 @@ impl AiClient {
     /// Create a new AI client from the application settings.
     pub fn new(settings: &Settings) -> Result<Self> {
         let mut headers = HeaderMap::new();
-        headers.insert(
-            CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        );
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
         let client = Client::builder()
             .default_headers(headers)
@@ -86,8 +83,14 @@ impl AiClient {
                         .post(&url)
                         .header(
                             AUTHORIZATION,
-                            HeaderValue::from_str(&format!("Bearer {}", api_key.inner()))
-                                .map_err(|e| AgentError::Config(format!("Invalid API key for auth header: {}", e)))?,
+                            HeaderValue::from_str(&format!("Bearer {}", api_key.inner())).map_err(
+                                |e| {
+                                    AgentError::Config(format!(
+                                        "Invalid API key for auth header: {}",
+                                        e
+                                    ))
+                                },
+                            )?,
                         )
                         .json(&request)
                         .send()
@@ -154,10 +157,7 @@ impl AiClient {
                                 tokio::time::sleep(duration).await;
                             }
                             None => {
-                                return Err(AgentError::Ai(format!(
-                                    "Max retries exceeded: {}",
-                                    e
-                                )));
+                                return Err(AgentError::Ai(format!("Max retries exceeded: {}", e)));
                             }
                         }
                     } else {
@@ -195,9 +195,9 @@ fn body_snippet(body: &str) -> String {
 fn classify_error(status: reqwest::StatusCode, body: &str) -> AgentError {
     let snippet = body_snippet(body);
     match status {
-        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN => {
-            AgentError::Ai(format!("AI API authentication failed ({}): {}", status, snippet))
-        }
+        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN => AgentError::Ai(
+            format!("AI API authentication failed ({}): {}", status, snippet),
+        ),
         reqwest::StatusCode::NOT_FOUND => {
             AgentError::Ai(format!("AI API endpoint not found (404): {}", snippet))
         }
@@ -210,7 +210,6 @@ fn classify_error(status: reqwest::StatusCode, body: &str) -> AgentError {
         s => AgentError::Ai(format!("AI API error ({}): {}", s, snippet)),
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -297,22 +296,13 @@ mod tests {
 
     #[test]
     fn test_classify_errors() {
-        let err = classify_error(
-            reqwest::StatusCode::UNAUTHORIZED,
-            "invalid api key",
-        );
+        let err = classify_error(reqwest::StatusCode::UNAUTHORIZED, "invalid api key");
         assert!(err.to_string().contains("authentication failed"));
 
-        let err = classify_error(
-            reqwest::StatusCode::TOO_MANY_REQUESTS,
-            "rate limited",
-        );
+        let err = classify_error(reqwest::StatusCode::TOO_MANY_REQUESTS, "rate limited");
         assert!(err.to_string().contains("rate limit"));
 
-        let err = classify_error(
-            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-            "server error",
-        );
+        let err = classify_error(reqwest::StatusCode::INTERNAL_SERVER_ERROR, "server error");
         assert!(err.to_string().contains("server error"));
     }
 

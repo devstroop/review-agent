@@ -9,10 +9,11 @@ src/main.rs      — clap CLI (review + serve subcommands); event filter (skip b
 src/config.rs    — Settings::load() — TOML + env overlay (Sensitive<T> for secrets)
 src/error.rs     — AgentError enum (thiserror)
 src/sensitive.rs — Sensitive<T> — Display/Debug redacted as "***"
-src/github/      — reqwest client for GitHub API (in progress)
-src/diff.rs      — diff parser via similar crate; binary files auto-skipped (in progress)
-src/tokens.rs    — 3.5 chars/token heuristic; safe margin overestimates tokens (in progress)
-src/ai/          — OpenAI-compatible chat client; 90s timeout × 4 attempts ~7 min max (in progress)
+src/github/      — reqwest client for GitHub API (done)
+src/diff.rs      — diff parser via diffy crate; binary files auto-skipped (done)
+src/tokens.rs    — (len*2)/7 token heuristic; safe margin overestimates tokens (done)
+src/language.rs  — extension→language lookup via sorted slice + Path::extension() (done)
+src/ai/          — OpenAI-compatible chat client; 90s timeout × 4 attempts ~7 min max (done)
 src/tools/       — review orchestrator (in progress)
 prompts/         — system/user prompt templates
 ```
@@ -43,4 +44,4 @@ prompts/         — system/user prompt templates
 
 ## Current State
 
-Phase 1 done. Next: Phase 2 (github/mod.rs). See DECISIONS.md for full breakdown.
+Phase 1, 2, 3, 4 done. Next: Phase 5 (src/tools/review.rs). See DECISIONS.md for full breakdown.

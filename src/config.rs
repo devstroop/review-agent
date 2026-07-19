@@ -3,8 +3,7 @@ use crate::sensitive::Sensitive;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Settings {
     #[serde(default)]
     pub ai: AiConfig,
@@ -183,7 +182,6 @@ fn default_max_input_tokens() -> usize {
 fn default_max_diff_files() -> usize {
     50
 }
-
 
 impl Default for AiConfig {
     fn default() -> Self {
