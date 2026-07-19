@@ -1,20 +1,43 @@
+# In the review-agent repo itself, the local `uses: ./` strategy
+# applies (builds the Dockerfile from the checked-out source) with inputs
+# matching action.yml. AI_API_BASE and MODEL defaults are set here so the
+# workflow can override them per-job; action.yml provides its own defaults
+# as fallback for consumers who omit them.
+#
+# Usage when consuming from another repo:
+#   - uses: devstroop/review-agent@v0.1.0
+#     with:
+#       github_token: ${{ secrets.GITHUB_TOKEN }}
+#       ai_api_key: ${{ secrets.AI_API_KEY }}
 name: Review Agent
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   review:
-    # Skip bots (avoids feedback loop with PR-Agent or other bots)
-    if: ${{ github.event.sender.type != 'Bot' }}
+    # Skip bots (avoids feedback loop with bots) and draft PRs.
+    if: >
+      github.event.pull_request
+      && github.event.sender.type != 'Bot'
+      && !github.event.pull_request.draft
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
     steps:
+      - uses: actions/checkout@v4
+
       - name: Run review-agent
-        uses: devstroop/review-agent@v0.1.0
+        uses: ./
+        with:
+          # Only needed if not running inside a PR context (local dev).
+          # pr_url: 'https://github.com/owner/repo/pull/123'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          ai_api_key: ${{ secrets.AI_API_KEY }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AI_API_KEY: ${{ secrets.AI_API_KEY }}
-          AI_API_BASE: ${{ secrets.AI_API_BASE }}
-          MODEL: ${{ secrets.MODEL }}
+          AI_API_BASE: ${{ secrets.AI_API_BASE || 'https://ai.cloudmagic.io/v1' }}
+          MODEL: ${{ secrets.MODEL || 'glm-4.6' }}
