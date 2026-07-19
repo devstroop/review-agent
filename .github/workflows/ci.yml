@@ -31,5 +31,9 @@ jobs:
       - name: Test
         run: cargo test
 
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
       - name: Audit
-        uses: actions-rust-lang/audit@v4
+        run: cargo audit
