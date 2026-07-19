@@ -14,7 +14,7 @@ src/diff.rs      — diff parser via diffy crate; binary files auto-skipped (don
 src/tokens.rs    — (len*2)/7 token heuristic; safe margin overestimates tokens (done)
 src/language.rs  — extension→language lookup via sorted slice + Path::extension() (done)
 src/ai/          — OpenAI-compatible chat client; 90s timeout × 4 attempts ~7 min max (done)
-src/tools/       — review orchestrator (in progress — feat/review-tool)
+src/tools/       — review orchestrator (done)
 prompts/         — system/user prompt templates
 Dockerfile       — multi-stage Docker build (musl static → distroless/static) (done)
 action.yml       — GitHub Action metadata (Docker strategy) (done)
@@ -48,10 +48,4 @@ action.yml       — GitHub Action metadata (Docker strategy) (done)
 
 ## Current State
 
-| Phase | What | Status |
-|---|---|---|
-| 1–4 | Scaffold, config, error, sensitive, logging, CLI, CI, GitHub client, diff parser, token manager, language detection, AI client | ✅ Done |
-| 5 | Review tool orchestrator (`src/tools/review.rs`) | 🏗️ `feat/review-tool` worktree |
-| 6 | CLI wiring (parse_pr_url, ReviewTool integration) | 🏗️ `feat/review-tool` worktree |
-| **7** | **Docker & Action (Dockerfile, action.yml, .dockerignore, release workflow)** | ✅ **Done** (this branch) |
-| 8 | CI polish (badges, release automation) | ⬜ Next
+Phase 1, 2, 3, 4, 5 done. Next: Phase 6 (CLI wiring — partially done). See DECISIONS.md for full breakdown.

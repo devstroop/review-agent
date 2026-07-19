@@ -7,6 +7,7 @@ pub mod language;
 pub mod logging;
 pub mod sensitive;
 pub mod tokens;
+pub mod tools;
 
 pub use config::Settings;
 pub use error::{AgentError, Result};

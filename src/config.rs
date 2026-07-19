@@ -150,6 +150,10 @@ pub struct GitHubConfig {
     #[serde(default)]
     pub token: Sensitive<String>,
 
+    /// Optional override for the GitHub API base URL. Empty → public GitHub.
+    #[serde(default)]
+    pub base_url: String,
+
     #[serde(default = "default_github_timeout")]
     pub request_timeout_secs: u64,
 
@@ -200,6 +204,7 @@ impl Default for GitHubConfig {
     fn default() -> Self {
         Self {
             token: Sensitive::new(String::new()),
+            base_url: String::new(),
             request_timeout_secs: default_github_timeout(),
             max_concurrent_requests: default_github_concurrency(),
         }
@@ -351,6 +356,7 @@ mod tests {
             },
             github: GitHubConfig {
                 token: Sensitive::new("test-token".into()),
+                base_url: String::new(),
                 request_timeout_secs: 15,
                 max_concurrent_requests: 3,
             },
