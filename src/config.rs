@@ -1,8 +1,25 @@
+//! Configuration loading: TOML file search, env var overlay, and validation.
+//!
+//! Config search order (first file found wins, then env vars override):
+//!   1. `$GITHUB_WORKSPACE/.github/review-agent.toml` (GitHub Action context)
+//!   2. `$CWD/review-agent.toml`
+//!   3. `$CWD/.review-agent.toml`
+//!   4. `~/.config/review-agent/config.toml`
+//!   5. Built-in defaults (no file needed)
+//!
+//! Secrets (API keys, tokens) use [`Sensitive<T>`] to prevent accidental
+//! leakage in logs or serde serialization.
+
 use crate::error::{AgentError, Result};
 use crate::sensitive::Sensitive;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Top-level application configuration.
+///
+/// Three sections: [`AiConfig`] (AI endpoint), [`GitHubConfig`] (API client),
+/// and [`ReviewConfig`] (budget caps). Constructed via [`Settings::load()`]
+/// which chains file search → env overlay → validation.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Settings {
     #[serde(default)]
@@ -36,6 +53,14 @@ impl Settings {
     }
 
     /// Overlay environment variables on top of loaded config.
+    ///
+    /// Overrides applied:
+    /// - `AI_API_KEY` → `ai.api_key`
+    /// - `AI_API_BASE` → `ai.api_base`
+    /// - `MODEL` → `ai.model`
+    /// - `GITHUB_TOKEN` → `github.token`
+    ///
+    /// Env vars take precedence over values read from any TOML file.
     pub fn with_env_overrides(&mut self) {
         if let Ok(v) = std::env::var("AI_API_KEY") {
             self.ai.api_key = Sensitive::new(v);
@@ -52,6 +77,10 @@ impl Settings {
     }
 
     /// Validate required fields are present.
+    ///
+    /// Returns `AgentError::Config` if `github.token` or `ai.api_key` are
+    /// empty after file loading + env overlay. Call this as the last step
+    /// of `load()` so the error message is actionable.
     pub fn validate(&self) -> Result<()> {
         if self.github.token.inner().is_empty() {
             return Err(AgentError::Config(
@@ -108,6 +137,10 @@ impl Settings {
     }
 }
 
+/// AI provider configuration.
+///
+/// Connects to any OpenAI-compatible `/v1/chat/completions` endpoint.
+/// The `api_key` field uses [`Sensitive<String>`] and is never logged.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiConfig {
     #[serde(default = "default_ai_api_base")]
@@ -145,6 +178,11 @@ fn default_ai_max_completion_tokens() -> u32 {
     4096
 }
 
+/// GitHub API client configuration.
+///
+/// Token permissions required:
+/// - `contents: read` — to fetch PR diffs and metadata
+/// - `pull-requests: write` — to post reviews and comments
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitHubConfig {
     #[serde(default)]
@@ -168,6 +206,10 @@ fn default_github_concurrency() -> usize {
     10
 }
 
+/// Review pipeline budget and behaviour configuration.
+///
+/// Controls how much diff content is sent to the AI and which files are
+/// eligible for review. Defaults are conservative to avoid surprise API costs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewConfig {
     #[serde(default = "default_max_input_tokens")]

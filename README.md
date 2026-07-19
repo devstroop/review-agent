@@ -26,13 +26,16 @@ jobs:
       pull-requests: write
     steps:
       - name: Run review-agent
-        uses: your-org/review-agent@v0.1.0
+        uses: devstroop/review-agent@v0.1.0
+        with:
+          pr_url: ${{ format('https://github.com/{0}/{1}/pull/{2}', github.repository_owner, github.event.repository.name, github.event.pull_request.number) }}
+          ai_api_key: ${{ secrets.AI_API_KEY }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AI_API_KEY: ${{ secrets.AI_API_KEY }}
-          AI_API_BASE: ${{ secrets.AI_API_BASE }}
-          MODEL: ${{ secrets.MODEL }}
+          AI_API_BASE: ${{ secrets.AI_API_BASE || 'https://ai.cloudmagic.io/v1' }}
+          MODEL: ${{ secrets.MODEL || 'glm-4.6' }}
 ```
+
+The action only fires on `opened`, `synchronize`, and `reopened` events. Draft PRs and bot senders are skipped by default to save costs and prevent feedback loops. The `pr_url` is automatically constructed from the event context — just pass it through. `GITHUB_TOKEN` defaults to the auto-generated token; no need to pass it explicitly.
 
 The action only fires on `opened`, `synchronize`, and `reopened` events. Draft PRs and bot senders are skipped by default to save costs and prevent feedback loops.
 

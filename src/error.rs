@@ -1,37 +1,82 @@
+//! Unified error types for all review-agent operations.
+//!
+//! [`AgentError`] is the single error enum used across every module. Each
+//! variant carries a human-readable message via `thiserror`. The [`is_transient`]
+//! method distinguishes retryable errors (rate limits, server errors, timeouts)
+//! from permanent failures (config errors, parse errors, bad URLs).
+//!
+//! [`Result<T>`] is a convenience alias over `std::result::Result<T, AgentError>`.
+
 use thiserror::Error;
 
+/// All errors that can occur during PR review processing.
+///
+/// Each variant wraps either a static message string (via `thiserror`'s
+/// `#[error("...")]` attribute) or transparently delegates to an underlying
+/// error type via `#[from]`.
+///
+/// Use [`is_transient()`](AgentError::is_transient) to determine whether an
+/// error is safe to retry.
 #[derive(Error, Debug)]
 pub enum AgentError {
+    /// A configuration error — missing required env var, invalid value, etc.
+    ///
+    /// These are **permanent** — retrying will not fix them.
     #[error("Config error: {0}")]
     Config(String),
 
+    /// A GitHub API error — non-transient 4xx response (e.g. 404, 403).
+    ///
+    /// Transient GitHub errors (429, 5xx) are identified by message prefix
+    /// in [`is_transient()`](AgentError::is_transient).
     #[error("GitHub API error: {0}")]
     GitHub(String),
 
+    /// An AI API error — non-transient error from the chat endpoint.
+    ///
+    /// Transient AI errors (429, 5xx) are identified by message prefix
+    /// in [`is_transient()`](AgentError::is_transient).
     #[error("AI API error: {0}")]
     Ai(String),
 
+    /// A diff parsing error — the raw diff text is structurally invalid.
     #[error("Diff parse error: {0}")]
     Diff(String),
 
+    /// The token budget was exceeded by the diff content.
+    ///
+    /// Applies when `used` tokens exceed the `limit` configured in
+    /// `review.max_input_tokens` (default 16,000, hard cap 32,000).
     #[error("Token budget exceeded: {used} > {limit}")]
     TokenBudget { used: usize, limit: usize },
 
+    /// An operation timed out — includes the configured timeout in seconds.
+    ///
+    /// These are **transient** — a retry may succeed if the server has
+    /// recovered or load has decreased.
     #[error("Operation timed out after {0}s")]
     Timeout(u64),
 
+    /// An I/O error from the standard library (file read/write, etc.).
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// An HTTP error from `reqwest` — connection failure, DNS resolution,
+    /// TLS handshake failure, etc.
+    ///
+    /// These are **transient** — the underlying connection issue may resolve.
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
 
+    /// A JSON serialization/deserialization error from `serde_json`.
     #[error("Serialization error: {0}")]
     Serde(#[from] serde_json::Error),
 
+    /// A TOML parse error from the `toml` crate.
     #[error("TOML parse error: {0}")]
     Toml(#[from] toml::de::Error),
 
+    /// A URL parse error — invalid format, unsupported scheme, etc.
     #[error("Invalid URL: {0}")]
     InvalidUrl(String),
 }
@@ -73,6 +118,7 @@ impl AgentError {
     }
 }
 
+/// Convenience alias for `Result<T, AgentError>` used across the entire crate.
 pub type Result<T> = std::result::Result<T, AgentError>;
 
 #[cfg(test)]
