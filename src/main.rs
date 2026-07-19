@@ -30,47 +30,6 @@ enum Command {
     },
 }
 
-/// Parse a GitHub PR URL of the form
-/// `https://github.com/{owner}/{repo}/pull/{number}` into its components.
-fn parse_pr_url(url_str: &str) -> anyhow::Result<(String, String, u64)> {
-    let parsed = url::Url::parse(url_str).map_err(|e| anyhow::anyhow!("Invalid URL: {}", e))?;
-
-    // Validate scheme.
-    let scheme = parsed.scheme();
-    if scheme != "https" && scheme != "http" {
-        anyhow::bail!("Invalid PR URL scheme '{}': expected http or https", scheme);
-    }
-
-    // Get clean path segments (query, fragment, trailing slash handled by Url).
-    let segments: Vec<&str> = parsed
-        .path_segments()
-        .map(|s| s.filter(|p| !p.is_empty()).collect())
-        .unwrap_or_default();
-
-    // Find "pull" segment that is followed by a parseable PR number.
-    // Require exactly 2 segments before it (owner, repo) — extra
-    // subdirectories such as /a/b/c/pull/1 are rejected.
-    let pull_idx = segments
-        .windows(2)
-        .position(|w| w[0] == "pull" && w[1].parse::<u64>().is_ok())
-        .filter(|&i| i == 2)
-        .ok_or_else(|| {
-            anyhow::anyhow!("Invalid PR URL: expected https://HOST/owner/repo/pull/N")
-        })?;
-
-    let owner = segments[pull_idx - 2].to_string();
-    let repo = segments[pull_idx - 1].to_string();
-    let number: u64 = segments[pull_idx + 1]
-        .parse()
-        .map_err(|e: ParseIntError| anyhow::anyhow!("Invalid PR number: {}", e))?;
-
-    if owner.is_empty() || repo.is_empty() {
-        anyhow::bail!("Could not extract owner/repo from URL");
-    }
-
-    Ok((owner, repo, number))
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -93,40 +52,131 @@ async fn main() -> anyhow::Result<()> {
             let output = tool.run(&owner, &repo, number).await?;
 
             // Emit a step summary if running in GitHub Actions.
-            if let Ok(summary_path) = std::env::var("GITHUB_STEP_SUMMARY") {
-                let write_result = (|| -> std::io::Result<()> {
-                    use std::io::Write;
-                    let f = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(&summary_path)?;
-                    let mut w = std::io::BufWriter::new(f);
-                    writeln!(w, "## 🔍 Review Complete")?;
-                    writeln!(w)?;
-                    writeln!(w, "| Metric | Value |")?;
-                    writeln!(w, "|---|---|")?;
-                    writeln!(
-                        w,
-                        "| PR | #{} `{}` |",
-                        output.pr_number,
-                        output.pr_title.replace('|', "&#124;")
-                    )?;
-                    writeln!(w, "| Files changed | {} |", output.files_changed)?;
-                    writeln!(w, "| Files reviewed | {} |", output.files_reviewed)?;
-                    writeln!(w, "| Files skipped | {} |", output.files_skipped)?;
-                    writeln!(
-                        w,
-                        "| Est. input tokens | {} |",
-                        output.input_tokens_estimated
-                    )?;
-                    writeln!(w, "| Latency | {} ms |", output.latency_ms)?;
-                    w.flush()?;
-                    Ok(())
-                })();
-                if let Err(e) = write_result {
-                    tracing::warn!(error = %e, "Failed to write GITHUB_STEP_SUMMARY");
+            // Unix: full TOCTOU-safe open with symlink-swap detection.
+            // Non-Unix: simpler open + write (no dev/ino comparison available).
+            #[cfg(unix)]
+            let _ = (|| -> anyhow::Result<()> {
+                use std::os::unix::fs::MetadataExt;
+
+                let summary_path = match std::env::var("GITHUB_STEP_SUMMARY") {
+                    Ok(p) => p,
+                    Err(_) => return Ok(()),
+                };
+
+                // Open the file first, then validate its properties on the
+                // open file handle — this eliminates the TOCTOU race between
+                // checking the path and opening the file.
+                let mut f = match std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&summary_path)
+                {
+                    Ok(f) => f,
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            path = %summary_path,
+                            "Failed to open step summary file — skipping summary"
+                        );
+                        return Ok(());
+                    }
+                };
+
+                // Resolve the real path and verify it matches the open file
+                // handle via device+inode comparison.  This closes the symlink
+                // swap window between open + metadata + canonicalize.
+                let canonical = match f.metadata() {
+                    Ok(meta) => {
+                        if !meta.is_file() {
+                            tracing::warn!(
+                                path = %summary_path,
+                                "GITHUB_STEP_SUMMARY is not a regular file — skipping summary"
+                            );
+                            return Ok(());
+                        }
+                        let dev = meta.dev();
+                        let ino = meta.ino();
+                        let canon = std::fs::canonicalize(&summary_path)
+                            .unwrap_or_else(|_| summary_path.clone().into());
+                        // Verify the canonical path resolves to the same inode
+                        // as the already-open handle — detects symlink swaps.
+                        match std::fs::metadata(&canon) {
+                            Ok(canon_meta)
+                                if canon_meta.dev() == dev && canon_meta.ino() == ino =>
+                            {
+                                canon
+                            }
+                            Ok(_) => {
+                                tracing::warn!(
+                                    path = %canon.display(),
+                                    "GITHUB_STEP_SUMMARY symlink swapped between open and resolve — skipping summary"
+                                );
+                                return Ok(());
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    error = %e,
+                                    path = %canon.display(),
+                                    "Cannot read canonical path metadata — skipping summary"
+                                );
+                                return Ok(());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            path = %summary_path,
+                            "Cannot read step summary metadata — skipping summary"
+                        );
+                        return Ok(());
+                    }
+                };
+
+                // Verify the path is in an expected GitHub Actions directory.
+                if !is_safe_summary_path(&canonical) {
+                    return Ok(());
                 }
-            }
+
+                write_step_summary(&mut f, &output)
+            })();
+
+            #[cfg(not(unix))]
+            let _ = (|| -> anyhow::Result<()> {
+                let summary_path = match std::env::var("GITHUB_STEP_SUMMARY") {
+                    Ok(p) => p,
+                    Err(_) => return Ok(()),
+                };
+
+                let mut f = match std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&summary_path)
+                {
+                    Ok(f) => f,
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            path = %summary_path,
+                            "Failed to open step summary file — skipping summary"
+                        );
+                        return Ok(());
+                    }
+                };
+
+                // Basic safety check: verify it's a regular file.
+                if let Ok(meta) = f.metadata() {
+                    if !meta.is_file() {
+                        tracing::warn!(
+                            path = %summary_path,
+                            "GITHUB_STEP_SUMMARY is not a regular file — skipping summary"
+                        );
+                        return Ok(());
+                    }
+                }
+
+                write_step_summary(&mut f, &output)
+            })();
 
             println!("Review posted for PR #{}", output.pr_number);
         }
@@ -137,6 +187,151 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Check whether a canonicalized path is in an expected GitHub Actions location.
+/// Only used on Unix (where TOCTOU detection is active).
+#[cfg(unix)]
+fn is_safe_summary_path(canonical: &std::path::Path) -> bool {
+    let runner_temp = std::env::var("RUNNER_TEMP").unwrap_or_default();
+    let workspace = std::env::var("GITHUB_WORKSPACE").unwrap_or_default();
+    let path_str = canonical.to_string_lossy();
+    path_str.starts_with("/tmp/")
+        || path_str.starts_with("/home/runner/")
+        || path_str.starts_with("/github/")
+        || (!runner_temp.is_empty() && path_str.starts_with(&runner_temp))
+        || (!workspace.is_empty() && path_str.starts_with(&workspace))
+}
+
+/// Write the step summary rows and flush. Shared by Unix and non-Unix code paths.
+fn write_step_summary(
+    f: &mut std::fs::File,
+    output: &review_agent::tools::review::ReviewOutput,
+) -> anyhow::Result<()> {
+    use std::io::Write;
+    // Escape a value for safe inclusion in a markdown table cell.
+    // Uses the HTML entity &#124; for pipes since \| is not universally
+    // supported by Markdown renderers.
+    // A single char-scan avoids clippy::collapsible_str_replace.
+    let md_escape = |s: &str| -> String {
+        let mut out = String::with_capacity(s.len());
+        for c in s.chars() {
+            match c {
+                '&' => out.push_str("&amp;"),
+                '<' => out.push_str("&lt;"),
+                '>' => out.push_str("&gt;"),
+                '|' => out.push_str("&#124;"),
+                '\n' | '\r' => out.push(' '),
+                _ => out.push(c),
+            }
+        }
+        out
+    };
+    // Leading newline ensures separation from any prior
+    // content in the step summary file.
+    let rows = [
+        String::new(),
+        "## 🔍 Review Complete".to_string(),
+        String::new(),
+        "| Metric | Value |".to_string(),
+        "|---|---|".to_string(),
+        format!(
+            "| PR | #{} {} |",
+            output.pr_number,
+            md_escape(&output.pr_title)
+        ),
+        format!("| Files changed | {} |", output.files_changed),
+        format!("| Files reviewed | {} |", output.files_reviewed),
+        format!("| Files skipped | {} |", output.files_skipped),
+        format!("| Est. input tokens | {} |", output.input_tokens_estimated),
+        format!("| Latency | {} ms |", output.latency_ms),
+    ];
+    for row in &rows {
+        if let Err(e) = writeln!(f, "{row}") {
+            tracing::warn!(error = %e, "Failed to write step summary row");
+        }
+    }
+    // Flush to ensure all content is written before the
+    // process exits — otherwise a panic after this point
+    // could lose buffered output.
+    if let Err(e) = f.flush() {
+        tracing::warn!(error = %e, "Failed to flush step summary file");
+    }
+    Ok(())
+}
+
+/// Parse a GitHub PR URL of the form
+/// `https://github.com/{owner}/{repo}/pull/{number}` into its components.
+///
+/// Also accepts `www.github.com`. Uses the `url` crate for parsing so that
+/// percent-encoded path segments (e.g. `user%2Fname`) are decoded correctly.
+fn parse_pr_url(url_str: &str) -> anyhow::Result<(String, String, u64)> {
+    // Trim trailing slash before parsing — without it, path_segments() includes
+    // a trailing empty segment that breaks segment-count checks.
+    let url_str = url_str.trim_end_matches('/');
+    let parsed = url::Url::parse(url_str).map_err(|_| {
+        anyhow::anyhow!("Invalid PR URL: expected https://github.com/owner/repo/pull/N")
+    })?;
+
+    if parsed.scheme() != "https" {
+        anyhow::bail!("Invalid PR URL: expected https://github.com/owner/repo/pull/N");
+    }
+
+    let host = parsed.host_str().unwrap_or("");
+    if !host.eq_ignore_ascii_case("github.com") && !host.eq_ignore_ascii_case("www.github.com") {
+        anyhow::bail!("Invalid PR URL: expected https://github.com/owner/repo/pull/N");
+    }
+
+    // url::Url path_segments() returns raw (percent-encoded) segments.
+    // Decode each segment — reject non-UTF-8 instead of silently replacing.
+    let segments: Vec<String> = parsed
+        .path_segments()
+        .map(|s| -> anyhow::Result<Vec<String>> {
+            s.map(|seg| {
+                percent_encoding::percent_decode_str(seg)
+                    .decode_utf8()
+                    .map(|c| c.into_owned())
+                    .map_err(|_| {
+                        anyhow::anyhow!("Invalid PR URL: path segment contains non-UTF-8 bytes")
+                    })
+            })
+            .collect()
+        })
+        .transpose()?
+        .unwrap_or_default();
+    // Expected: ["owner", "repo", "pull", "number"]
+    if segments.len() != 4 || !segments[segments.len() - 2].eq_ignore_ascii_case("pull") {
+        anyhow::bail!("Invalid PR URL: expected https://github.com/owner/repo/pull/N");
+    }
+
+    let owner = segments[0].clone();
+    let repo = segments[1].clone();
+    let number: u64 = segments[3]
+        .parse()
+        .map_err(|e: ParseIntError| anyhow::anyhow!("Invalid PR number: {}", e))?;
+
+    // Validate that owner/repo are safe identifiers.  After percent-decoding,
+    // a `%2F` would produce a literal `/`, enabling path traversal in downstream
+    // API calls.  GitHub owner/repo names only allow: alphanumeric, `.`, `_`, `-`.
+    let validate_segment = |name: &str, label: &str| -> anyhow::Result<()> {
+        if name.is_empty() {
+            anyhow::bail!("{label} is empty");
+        }
+        if name.contains('/') || name.contains("..") {
+            anyhow::bail!("{label} `{name}` contains path traversal characters");
+        }
+        if !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+        {
+            anyhow::bail!("{label} `{name}` contains invalid characters");
+        }
+        Ok(())
+    };
+    validate_segment(&owner, "owner")?;
+    validate_segment(&repo, "repo")?;
+
+    Ok((owner, repo, number))
 }
 
 #[cfg(test)]
@@ -175,53 +370,61 @@ mod tests {
     }
 
     #[test]
-    fn parse_pr_url_accepts_any_host() {
-        // The parser is purely positional — any host works, which supports
-        // GitHub Enterprise instances with a custom API base URL.
-        let (owner, repo, number) =
-            parse_pr_url("https://gitlab.internal/owner/repo/pull/1").unwrap();
-        assert_eq!(owner, "owner");
-        assert_eq!(repo, "repo");
+    fn parse_pr_url_with_fragment() {
+        let (owner, repo, number) = parse_pr_url("https://github.com/o/r/pull/7#section").unwrap();
+        assert_eq!(owner, "o");
+        assert_eq!(repo, "r");
+        assert_eq!(number, 7);
+    }
+
+    #[test]
+    fn parse_pr_url_extra_path_segments_rejected() {
+        // Extra path before owner/repo should not silently mis-parse.
+        assert!(parse_pr_url("https://github.com/base/o/r/pull/123").is_err());
+    }
+
+    #[test]
+    fn parse_pr_url_wrong_host_rejected() {
+        assert!(parse_pr_url("https://gitlab.com/o/r/pull/1").is_err());
+        assert!(parse_pr_url("https://malicious.example.com/o/r/pull/1").is_err());
+    }
+
+    #[test]
+    fn parse_pr_url_http_scheme_rejected() {
+        assert!(parse_pr_url("http://github.com/o/r/pull/1").is_err());
+    }
+
+    #[test]
+    fn parse_pr_url_case_insensitive_host() {
+        let number = parse_pr_url("https://GITHUB.COM/o/r/pull/1").unwrap().2;
+        assert_eq!(number, 1);
+        let number = parse_pr_url("https://Github.com/o/r/pull/1").unwrap().2;
+        assert_eq!(number, 1);
+    }
+
+    #[test]
+    fn parse_pr_url_www_subdomain() {
+        let (owner, repo, number) = parse_pr_url("https://www.github.com/o/r/pull/1").unwrap();
+        assert_eq!(owner, "o");
+        assert_eq!(repo, "r");
+        assert_eq!(number, 1);
+    }
+
+    #[test]
+    fn parse_pr_url_percent_decoded_rejected() {
+        // Percent-decoded `/` would enable path traversal — must be rejected.
+        assert!(parse_pr_url("https://github.com/user%2Fname/repo%2Btest/pull/1").is_err());
+    }
+
+    #[test]
+    fn parse_pr_url_case_insensitive_pull() {
+        let (_owner, _repo, number) = parse_pr_url("https://github.com/o/r/Pull/1").unwrap();
         assert_eq!(number, 1);
 
-        let (owner2, repo2, number2) = parse_pr_url("http://example.com/a/b/pull/2").unwrap();
-        assert_eq!(owner2, "a");
-        assert_eq!(repo2, "b");
-        assert_eq!(number2, 2);
-    }
+        let number = parse_pr_url("https://github.com/o/r/PULL/2").unwrap().2;
+        assert_eq!(number, 2);
 
-    #[test]
-    fn parse_pr_url_rejects_wrong_scheme() {
-        assert!(parse_pr_url("ftp://github.com/owner/repo/pull/1").is_err());
-        assert!(parse_pr_url("ssh://github.com/o/r/pull/1").is_err());
-    }
-
-    #[test]
-    fn parse_pr_url_with_trailing_path_segments() {
-        // Canonical PR URLs often include /files, /commits, etc.
-        let (owner, repo, number) = parse_pr_url("https://github.com/o/r/pull/7/files").unwrap();
-        assert_eq!(owner, "o");
-        assert_eq!(repo, "r");
-        assert_eq!(number, 7);
-
-        let (_, _, number2) = parse_pr_url("https://github.com/o/r/pull/99/commits").unwrap();
-        assert_eq!(number2, 99);
-    }
-
-    #[test]
-    fn parse_pr_url_with_fragment() {
-        let (owner, repo, number) =
-            parse_pr_url("https://github.com/o/r/pull/7#issuecomment-123").unwrap();
-        assert_eq!(owner, "o");
-        assert_eq!(repo, "r");
-        assert_eq!(number, 7);
-    }
-
-    #[test]
-    fn parse_pr_url_with_http() {
-        let (owner, repo, number) = parse_pr_url("http://github.com/o/r/pull/3").unwrap();
-        assert_eq!(owner, "o");
-        assert_eq!(repo, "r");
+        let number = parse_pr_url("https://github.com/o/r/pUlL/3").unwrap().2;
         assert_eq!(number, 3);
     }
 }
