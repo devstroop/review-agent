@@ -350,23 +350,7 @@ fn classify_error(status: StatusCode, body: &str) -> AgentError {
     }
 }
 
-// We need to mark errors as transient so the retry loop knows what to retry.
-// This extension lives on AgentError so it stays generic.
-impl AgentError {
-    fn is_transient(&self) -> bool {
-        match self {
-            // HTTP 429 / 5xx errors from GitHub or AI are transient
-            Self::GitHub(msg) => {
-                msg.starts_with("GitHub API transient error")
-                    || msg.starts_with("GitHub API rate limit exceeded")
-                    || msg.starts_with("GitHub API error (5")
-                    || msg.starts_with("GitHub API error (429)")
-            }
-            Self::Http(_) | Self::Timeout(_) => true,
-            _ => false,
-        }
-    }
-}
+// classify_error is defined above — is_transient now lives in error.rs
 
 #[cfg(test)]
 mod tests {
