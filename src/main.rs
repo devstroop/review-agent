@@ -244,6 +244,20 @@ fn write_step_summary(
         format!("| Files reviewed | {} |", output.files_reviewed),
         format!("| Files skipped | {} |", output.files_skipped),
         format!("| Est. input tokens | {} |", output.input_tokens_estimated),
+        format!(
+            "| Output tokens | {} |",
+            output
+                .output_tokens_reported
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| "N/A".to_string())
+        ),
+        format!(
+            "| Total tokens | {} |",
+            output
+                .total_tokens_used
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| "N/A".to_string())
+        ),
         format!("| Latency | {} ms |", output.latency_ms),
     ];
     for row in &rows {
