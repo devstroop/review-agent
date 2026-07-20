@@ -76,11 +76,13 @@ impl Settings {
         }
     }
 
-    /// Validate required fields are present.
+    /// Validate required fields are present and config values are in range.
     ///
     /// Returns `AgentError::Config` if `github.token` or `ai.api_key` are
-    /// empty after file loading + env overlay. Call this as the last step
-    /// of `load()` so the error message is actionable.
+    /// empty after file loading + env overlay. Also validates `ai.temperature`
+    /// is within the 0.0–2.0 range supported by OpenAI-compatible models.
+    /// Call this as the last step of `load()` so the error message is
+    /// actionable.
     pub fn validate(&self) -> Result<()> {
         if self.github.token.inner().is_empty() {
             return Err(AgentError::Config(
@@ -91,6 +93,17 @@ impl Settings {
             return Err(AgentError::Config(
                 "AI_API_KEY is required — set via env var or config file".into(),
             ));
+        }
+        if self.ai.temperature.is_nan() || !(0.0..=2.0).contains(&self.ai.temperature) {
+            let detail = if self.ai.temperature.is_nan() {
+                "NaN (not a number)".to_string()
+            } else {
+                self.ai.temperature.to_string()
+            };
+            return Err(AgentError::Config(format!(
+                "ai.temperature must be a finite number between 0.0 and 2.0, got {}",
+                detail
+            )));
         }
         Ok(())
     }
@@ -311,6 +324,34 @@ mod tests {
         let mut s = Settings::default();
         s.github.token = Sensitive::new("ghp_token".into());
         s.ai.api_key = Sensitive::new("sk-key".into());
+        assert!(s.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_out_of_range_temperature() {
+        let mut s = Settings::default();
+        s.github.token = Sensitive::new("ghp_token".into());
+        s.ai.api_key = Sensitive::new("sk-key".into());
+
+        // Below 0.0
+        s.ai.temperature = -0.5;
+        let err = s.validate().unwrap_err();
+        assert!(err.to_string().contains("temperature"));
+
+        // Above 2.0
+        s.ai.temperature = 3.0;
+        let err = s.validate().unwrap_err();
+        assert!(err.to_string().contains("temperature"));
+
+        // NaN
+        s.ai.temperature = f64::NAN;
+        let err = s.validate().unwrap_err();
+        assert!(err.to_string().contains("NaN"));
+
+        // Boundary values should pass
+        s.ai.temperature = 0.0;
+        assert!(s.validate().is_ok());
+        s.ai.temperature = 2.0;
         assert!(s.validate().is_ok());
     }
 

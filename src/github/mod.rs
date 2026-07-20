@@ -129,15 +129,6 @@ impl GitHub {
         self.get_json(&url).await
     }
 
-    /// Fetch the list of files changed in a pull request.
-    pub async fn get_pr_files(&self, owner: &str, repo: &str, number: u64) -> Result<Vec<PrFile>> {
-        let url = format!(
-            "{}/repos/{}/{}/pulls/{}/files",
-            self.api_base, owner, repo, number
-        );
-        self.get_json(&url).await
-    }
-
     /// Post a review on a pull request.
     ///
     /// `event` controls the review type: Approve, RequestChanges, or Comment.
@@ -164,33 +155,6 @@ impl GitHub {
         self.post_json(&url, &review_body).await
     }
 
-    /// Post a comment on a pull request (as an issue comment).
-    pub async fn publish_comment(
-        &self,
-        owner: &str,
-        repo: &str,
-        number: u64,
-        body: &str,
-    ) -> Result<Comment> {
-        let url = format!(
-            "{}/repos/{}/{}/issues/{}/comments",
-            self.api_base, owner, repo, number
-        );
-
-        #[derive(serde::Serialize)]
-        struct CommentBody<'a> {
-            body: &'a str,
-        }
-
-        self.post_json(&url, &CommentBody { body }).await
-    }
-
-    /// Fetch the language breakdown for a repository.
-    pub async fn get_languages(&self, owner: &str, repo: &str) -> Result<LanguageBreakdown> {
-        let url = format!("{}/repos/{}/{}/languages", self.api_base, owner, repo);
-        self.get_json(&url).await
-    }
-
     // ──────────────────────────────────────
     // Internal HTTP helpers
     // ──────────────────────────────────────
@@ -198,18 +162,26 @@ impl GitHub {
     /// Perform a GET request and return the response body as a plain string.
     /// Used for fetching raw diffs with a custom Accept header.
     async fn get_with_accept(&self, url: String, accept: &str) -> Result<String> {
-        let _permit = self.semaphore.acquire().await.unwrap();
+        let _permit = self.semaphore.acquire().await.map_err(|e| {
+            AgentError::GitHub(format!("Semaphore acquire failed: {}", e))
+        })?;
         self.rate_limiter.until_ready().await;
 
+        let accept = accept.to_string();
         let response = self
             .retry(move || {
                 let client = self.client.clone();
                 let url = url.clone();
-                let accept = accept.to_string();
+                let accept = accept.clone();
                 async move {
                     let resp = client
                         .get(&url)
-                        .header(ACCEPT, HeaderValue::from_str(&accept).unwrap())
+                        .header(
+                            ACCEPT,
+                            HeaderValue::from_str(&accept).map_err(|e| {
+                                AgentError::Config(format!("Invalid Accept header: {}", e))
+                            })?,
+                        )
                         .send()
                         .await?;
 
@@ -218,8 +190,13 @@ impl GitHub {
                         let text = resp.text().await?;
                         Ok(text)
                     } else {
+                        let rate_remaining = resp
+                            .headers()
+                            .get("X-RateLimit-Remaining")
+                            .and_then(|v| v.to_str().ok())
+                            .map(|s| s.to_string());
                         let text = resp.text().await.unwrap_or_default();
-                        Err(classify_error(status, &text))
+                        Err(classify_error(status, &text, rate_remaining.as_deref()))
                     }
                 }
             })
@@ -230,7 +207,9 @@ impl GitHub {
 
     /// Perform a GET request and deserialize the response as JSON.
     async fn get_json<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T> {
-        let _permit = self.semaphore.acquire().await.unwrap();
+        let _permit = self.semaphore.acquire().await.map_err(|e| {
+            AgentError::GitHub(format!("Semaphore acquire failed: {}", e))
+        })?;
         self.rate_limiter.until_ready().await;
 
         let url = url.to_string();
@@ -245,8 +224,13 @@ impl GitHub {
                         let json = resp.json().await?;
                         Ok(json)
                     } else {
+                        let rate_remaining = resp
+                            .headers()
+                            .get("X-RateLimit-Remaining")
+                            .and_then(|v| v.to_str().ok())
+                            .map(|s| s.to_string());
                         let text = resp.text().await.unwrap_or_default();
-                        Err(classify_error(status, &text))
+                        Err(classify_error(status, &text, rate_remaining.as_deref()))
                     }
                 }
             })
@@ -261,7 +245,9 @@ impl GitHub {
         url: &str,
         body: &B,
     ) -> Result<T> {
-        let _permit = self.semaphore.acquire().await.unwrap();
+        let _permit = self.semaphore.acquire().await.map_err(|e| {
+            AgentError::GitHub(format!("Semaphore acquire failed: {}", e))
+        })?;
         self.rate_limiter.until_ready().await;
 
         let url = url.to_string();
@@ -278,8 +264,13 @@ impl GitHub {
                         let json = resp.json().await?;
                         Ok(json)
                     } else {
+                        let rate_remaining = resp
+                            .headers()
+                            .get("X-RateLimit-Remaining")
+                            .and_then(|v| v.to_str().ok())
+                            .map(|s| s.to_string());
                         let text = resp.text().await.unwrap_or_default();
-                        Err(classify_error(status, &text))
+                        Err(classify_error(status, &text, rate_remaining.as_deref()))
                     }
                 }
             })
@@ -332,10 +323,19 @@ impl GitHub {
 }
 
 /// Classify an HTTP response status code into an AgentError.
-fn classify_error(status: StatusCode, body: &str) -> AgentError {
+///
+/// Uses the `X-RateLimit-Remaining` response header (when available) to
+/// accurately distinguish 403 rate-limit errors from 403 permission errors,
+/// rather than relying on body text matching alone (ADR-008).
+fn classify_error(status: StatusCode, body: &str, rate_limit_remaining: Option<&str>) -> AgentError {
     match status {
         StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
-            let msg = if body.contains("rate limit") {
+            // Prefer the X-RateLimit-Remaining header over body text for
+            // rate-limit detection — the header is authoritative, but when
+            // absent we fall back to body text matching as a heuristic.
+            let is_rate_limit = rate_limit_remaining == Some("0")
+                || (rate_limit_remaining.is_none() && body.contains("rate limit"));
+            let msg = if is_rate_limit {
                 "GitHub API rate limit exceeded".to_string()
             } else {
                 format!("GitHub API authentication failed ({}): {}", status, body)
@@ -380,16 +380,25 @@ mod tests {
 
     #[test]
     fn test_classify_errors() {
-        let err = classify_error(StatusCode::UNAUTHORIZED, "bad credentials");
+        let err = classify_error(StatusCode::UNAUTHORIZED, "bad credentials", None);
         assert!(err.to_string().contains("authentication failed"));
 
-        let err = classify_error(StatusCode::NOT_FOUND, "not found");
+        let err = classify_error(StatusCode::NOT_FOUND, "not found", None);
         assert!(err.to_string().contains("not found"));
 
-        let err = classify_error(StatusCode::TOO_MANY_REQUESTS, "");
+        let err = classify_error(StatusCode::TOO_MANY_REQUESTS, "", None);
         assert!(err.to_string().contains("transient"));
 
-        let err = classify_error(StatusCode::FORBIDDEN, "rate limit exceeded");
+        // When X-RateLimit-Remaining: 0, it's a rate limit even with a body
+        let err = classify_error(StatusCode::FORBIDDEN, "", Some("0"));
+        assert!(err.to_string().contains("rate limit"));
+
+        // When X-RateLimit-Remaining is not 0, it's an auth failure
+        let err = classify_error(StatusCode::FORBIDDEN, "bad credentials", Some("5"));
+        assert!(err.to_string().contains("authentication failed"));
+
+        // Without the header, fall back to body text (backward compat)
+        let err = classify_error(StatusCode::FORBIDDEN, "rate limit exceeded", None);
         assert!(err.to_string().contains("rate limit"));
     }
 
