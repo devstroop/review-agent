@@ -129,15 +129,6 @@ impl GitHub {
         self.get_json(&url).await
     }
 
-    /// Fetch the list of files changed in a pull request.
-    pub async fn get_pr_files(&self, owner: &str, repo: &str, number: u64) -> Result<Vec<PrFile>> {
-        let url = format!(
-            "{}/repos/{}/{}/pulls/{}/files",
-            self.api_base, owner, repo, number
-        );
-        self.get_json(&url).await
-    }
-
     /// Post a review on a pull request.
     ///
     /// `event` controls the review type: Approve, RequestChanges, or Comment.
@@ -162,33 +153,6 @@ impl GitHub {
         };
 
         self.post_json(&url, &review_body).await
-    }
-
-    /// Post a comment on a pull request (as an issue comment).
-    pub async fn publish_comment(
-        &self,
-        owner: &str,
-        repo: &str,
-        number: u64,
-        body: &str,
-    ) -> Result<Comment> {
-        let url = format!(
-            "{}/repos/{}/{}/issues/{}/comments",
-            self.api_base, owner, repo, number
-        );
-
-        #[derive(serde::Serialize)]
-        struct CommentBody<'a> {
-            body: &'a str,
-        }
-
-        self.post_json(&url, &CommentBody { body }).await
-    }
-
-    /// Fetch the language breakdown for a repository.
-    pub async fn get_languages(&self, owner: &str, repo: &str) -> Result<LanguageBreakdown> {
-        let url = format!("{}/repos/{}/{}/languages", self.api_base, owner, repo);
-        self.get_json(&url).await
     }
 
     // ──────────────────────────────────────
