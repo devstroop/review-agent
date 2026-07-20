@@ -9,7 +9,7 @@ A malicious PR diff could attempt to instruct the AI to produce hostile output, 
 
 **Mitigations:**
 - AI output is capped at `max_completion_tokens` (default 4096) to limit blast radius
-- Markdown blocks matching action directives are stripped before publishing
+- GitHub Actions workflow commands (`::command::` syntax) and ANSI escape sequences are stripped from AI output before publishing, even inside inline text — fenced code blocks containing these patterns are preserved as-is (code blocks are force-closed after 500 lines as a safety net against unmatched opening fences)
 - The `GITHUB_TOKEN` value is **never** included in the AI prompt context
 - Review length is bounded server-side by the model's context window
 
