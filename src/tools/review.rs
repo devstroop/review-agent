@@ -313,10 +313,11 @@ fn sanitize_output(text: &str) -> String {
             }
         }
 
-        // Outside code blocks (or just force-closed): strip GitHub Actions
-        // workflow commands and ANSI escape sequences.
-        let cleaned = strip_workflow_commands(line);
-        let cleaned = strip_ansi_escapes(&cleaned);
+        // Outside code blocks (or just force-closed): strip ANSI escape
+        // sequences first (so obfuscated `:\x1b[0m:command::value` is
+        // re-formed into `::command::value`), then strip workflow commands.
+        let cleaned = strip_ansi_escapes(line);
+        let cleaned = strip_workflow_commands(&cleaned);
         let _ = writeln!(result, "{cleaned}");
     }
 
@@ -485,6 +486,15 @@ mod tests {
         let input = "## Review\n\nThis is a **normal** review with `inline code`.";
         let result = sanitize_output(input);
         assert_eq!(result.trim(), input);
+    }
+
+    #[test]
+    fn sanitize_ansi_obfuscated_command_stripped() {
+        // ANSI escapes between colons must be stripped first so the
+        // re-formed ::command::value is then removed.
+        let input = ":\u{1b}[0m:warning::something happened";
+        let result = sanitize_output(input);
+        assert!(!result.contains("warning::"), "got: {result}");
     }
 
     #[test]
