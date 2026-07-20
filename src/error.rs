@@ -76,10 +76,7 @@ pub enum AgentError {
     /// A TOML parse error from the `toml` crate.
     #[error("TOML parse error: {0}")]
     Toml(#[from] toml::de::Error),
-
-    /// A URL parse error — invalid format, unsupported scheme, etc.
-    #[error("Invalid URL: {0}")]
-    InvalidUrl(String),
+    // (reserved for URL parse errors — currently handled via anyhow in parse_pr_url)
 }
 
 impl AgentError {
@@ -158,12 +155,6 @@ mod tests {
     fn timeout_message() {
         let err = AgentError::Timeout(90);
         assert_eq!(err.to_string(), "Operation timed out after 90s");
-    }
-
-    #[test]
-    fn invalid_url_message() {
-        let err = AgentError::InvalidUrl("bad url".into());
-        assert_eq!(err.to_string(), "Invalid URL: bad url");
     }
 
     #[test]

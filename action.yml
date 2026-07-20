@@ -47,7 +47,7 @@ runs:
     - --pr-url
     - ${{ inputs.pr_url }}
   env:
-    GITHUB_TOKEN: ${{ inputs.github_token || github.token }}
+    GITHUB_TOKEN: ${{ inputs.github_token }}
     AI_API_KEY: ${{ inputs.ai_api_key }}
     AI_API_BASE: ${{ inputs.ai_api_base }}
     MODEL: ${{ inputs.model }}

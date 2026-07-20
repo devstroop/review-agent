@@ -19,19 +19,18 @@ use tracing::warn;
 /// GitHub API base URL.
 const GITHUB_API_BASE: &str = "https://api.github.com";
 
-/// Pull request events for reviews.
+/// Pull request review event — currently only Comment is supported.
 #[derive(Debug, Clone)]
 pub enum ReviewEvent {
-    Approve,
-    RequestChanges,
     Comment,
 }
 
 impl ReviewEvent {
     fn as_str(&self) -> &'static str {
+        // Using match rather than a bare return so that adding new variants
+        // produces a compiler exhaustiveness error, reminding the developer
+        // to update this method.
         match self {
-            ReviewEvent::Approve => "APPROVE",
-            ReviewEvent::RequestChanges => "REQUEST_CHANGES",
             ReviewEvent::Comment => "COMMENT",
         }
     }
@@ -275,7 +274,7 @@ impl GitHub {
                 async move {
                     let resp = client.post(&url).json(&body).send().await?;
                     let status = resp.status();
-                    if status.is_success() || status == StatusCode::OK {
+                    if status.is_success() {
                         let json = resp.json().await?;
                         Ok(json)
                     } else {

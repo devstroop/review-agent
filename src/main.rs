@@ -244,6 +244,20 @@ fn write_step_summary(
         format!("| Files reviewed | {} |", output.files_reviewed),
         format!("| Files skipped | {} |", output.files_skipped),
         format!("| Est. input tokens | {} |", output.input_tokens_estimated),
+        format!(
+            "| Output tokens | {} |",
+            output
+                .output_tokens_reported
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| "N/A".to_string())
+        ),
+        format!(
+            "| Total tokens | {} |",
+            output
+                .total_tokens_used
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| "N/A".to_string())
+        ),
         format!("| Latency | {} ms |", output.latency_ms),
     ];
     for row in &rows {
@@ -414,6 +428,30 @@ mod tests {
     fn parse_pr_url_percent_decoded_rejected() {
         // Percent-decoded `/` would enable path traversal — must be rejected.
         assert!(parse_pr_url("https://github.com/user%2Fname/repo%2Btest/pull/1").is_err());
+    }
+
+    #[test]
+    fn parse_pr_url_error_messages_are_descriptive() {
+        let err = parse_pr_url("not-a-url").unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Invalid PR URL"),
+            "expected error about invalid URL, got: {msg}"
+        );
+
+        let err = parse_pr_url("https://gitlab.com/o/r/pull/1").unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Invalid PR URL"),
+            "expected error about invalid PR URL, got: {msg}"
+        );
+
+        let err = parse_pr_url("http://github.com/o/r/pull/1").unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Invalid PR URL"),
+            "expected error about invalid PR URL, got: {msg}"
+        );
     }
 
     #[test]

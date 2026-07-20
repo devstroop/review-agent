@@ -133,134 +133,42 @@ fn parse_single_file(section: &str) -> Result<Option<DiffFile>> {
     // markers. Scanning just this region prevents hunk-content substrings
     // (e.g. a comment `// rename from foo`) from misclassifying the file.
     let header = diff_header(section);
+    let has_hunks = section.contains("@@ ");
 
-    // Detect binary files early: GitHub emits `Binary files ... differ` and no hunks.
+    // ── Early returns for files without content hunks ───────────
+    // Binary files, mode-only changes, and pure renames/copies all lack
+    // `@@` hunk headers and must be handled before the diffy parser.
+    //
+    // Previously each path had its own inline construction of a DiffFile,
+    // and when the filename could not be extracted they fell through to
+    // diffy (which would also fail).  Now all three share build_simple_file,
+    // which returns Ok(None) when the filename is missing — a more honest
+    // outcome than silently passing garbage to diffy.
+
+    // 1. Binary files.
     if section.contains("Binary files") && section.contains("differ") {
-        let filename = extract_filename_from_diff_git(section).unwrap_or_default();
-        // Derive status. Check rename/copy before mode lines so a binary that
-        // was moved/copied is not misclassified as Modified, then fall back to
-        // mode lines (new/deleted binaries exist and should not be Modified).
-        let status = if header.contains("rename from") || header.contains("rename to") {
-            DiffStatus::Renamed
-        } else if header.contains("copy from") || header.contains("copy to") {
-            DiffStatus::Copied
-        } else if header.contains("new file mode") {
-            DiffStatus::Added
-        } else if header.contains("deleted file mode") {
-            DiffStatus::Deleted
-        } else {
-            DiffStatus::Modified
-        };
-        // For renames/copies capture the original name so the formatted output
-        // shows the full a/old b/new path even for binaries.
-        let old_filename = extract_old_filename(header);
-        // Capture mode lines (e.g. `new file mode 100644`) so filter_files
-        // keeps the file — without hunks or mode metadata it would be dropped.
-        // Use starts_with because git mode lines always begin at column 0.
-        let mode_lines: Vec<&str> = header
-            .lines()
-            .filter(|l| {
-                l.starts_with("old mode")
-                    || l.starts_with("new mode")
-                    || l.starts_with("new file mode")
-                    || l.starts_with("deleted file mode")
-            })
-            .collect();
-        let mode_change = if mode_lines.is_empty() {
-            None
-        } else {
-            Some(mode_lines.join("\n"))
-        };
-        return Ok(Some(DiffFile {
-            filename,
-            old_filename,
-            status,
-            hunks: Vec::new(),
-            additions: 0,
-            deletions: 0,
-            mode_change,
-        }));
+        return build_simple_file(section, header);
     }
 
-    // Mode-only changes (e.g. `chmod +x`) emit `old mode`/`new mode` lines with
-    // no hunks. `diffy` parses these but yields no usable filename, so handle
-    // them explicitly and preserve the mode metadata for the AI. Only treat as
-    // mode-only when there are no `@@` hunks — files that also carry content
-    // changes must fall through to the normal diffy parsing path.
-    // Use line-level starts_with checks because git mode lines always begin at
-    // column 0, and contains can false-positive on filenames or other headers.
-    if header.lines().any(|l| {
-        l.starts_with("old mode")
-            || l.starts_with("new file mode")
-            || l.starts_with("deleted file mode")
-    }) && !section.contains("@@ ")
+    // 2. Mode-only changes (e.g. chmod +x) — no hunks.
+    if !has_hunks
+        && header.lines().any(|l| {
+            l.starts_with("old mode")
+                || l.starts_with("new file mode")
+                || l.starts_with("deleted file mode")
+        })
     {
-        if let Some(filename) = extract_filename_from_diff_git(section) {
-            let mode_lines: Vec<&str> = header
-                .lines()
-                .filter(|l| {
-                    l.starts_with("old mode")
-                        || l.starts_with("new mode")
-                        || l.starts_with("new file mode")
-                        || l.starts_with("deleted file mode")
-                })
-                .collect();
-            let status = detect_status(header, None, None);
-            // A rename/copy that also carries a mode change must keep its
-            // original name so the formatted output shows the full a/old b/new path.
-            let old_filename = extract_old_filename(header);
-            return Ok(Some(DiffFile {
-                filename,
-                old_filename,
-                status,
-                hunks: Vec::new(),
-                additions: 0,
-                deletions: 0,
-                mode_change: Some(mode_lines.join("\n")),
-            }));
-        }
+        return build_simple_file(section, header);
     }
 
-    // Pure renames/copies with no content hunks (and no mode lines) cannot be
-    // parsed by diffy, so handle them explicitly. They are functionally
-    // relevant and must not be dropped. Only treat as pure rename/copy when
-    // there are no `@@` hunks — renames that also carry content changes must
-    // fall through to the normal diffy parsing path.
-    // Use starts_with for mode line matching — git mode lines always begin at
-    // column 0, and contains can false-positive on filenames or other headers.
-    if (header.contains("rename from")
-        || header.contains("copy from")
-        || header.contains("rename to")
-        || header.contains("copy to"))
-        && !section.contains("@@ ")
+    // 3. Pure renames/copies with no content hunks.
+    if !has_hunks
+        && (header.contains("rename from")
+            || header.contains("copy from")
+            || header.contains("rename to")
+            || header.contains("copy to"))
     {
-        if let Some(filename) = extract_filename_from_diff_git(section) {
-            let status = detect_status(header, None, None);
-            let old_filename = extract_old_filename(header);
-            let mode_lines: Vec<&str> = header
-                .lines()
-                .filter(|l| {
-                    l.starts_with("old mode")
-                        || l.starts_with("new mode")
-                        || l.starts_with("new file mode")
-                        || l.starts_with("deleted file mode")
-                })
-                .collect();
-            let mode_change = if mode_lines.is_empty() {
-                None
-            } else {
-                Some(mode_lines.join("\n"))
-            };
-            return Ok(Some(DiffFile {
-                filename,
-                old_filename,
-                status,
-                hunks: Vec::new(),
-                additions: 0,
-                deletions: 0,
-                mode_change,
-            }));
-        }
+        return build_simple_file(section, header);
     }
 
     // Remove the trailing blank line from the inter-file gap before passing to
@@ -368,22 +276,8 @@ fn parse_single_file(section: &str) -> Result<Option<DiffFile>> {
     }
 
     // Preserve mode metadata (e.g. chmod) even when the file also has content
-    // hunks, so permission changes are never hidden from the AI. Mode markers
-    // live in the header, so scan only that region.
-    let mode_lines: Vec<&str> = header
-        .lines()
-        .filter(|l| {
-            l.contains("old mode")
-                || l.contains("new mode")
-                || l.contains("new file mode")
-                || l.contains("deleted file mode")
-        })
-        .collect();
-    let mode_change = if mode_lines.is_empty() {
-        None
-    } else {
-        Some(mode_lines.join("\n"))
-    };
+    // hunks, so permission changes are never hidden from the AI.
+    let mode_change = extract_mode_lines(header);
 
     Ok(Some(DiffFile {
         filename,
@@ -477,6 +371,52 @@ fn extract_filename_from_diff_git(section: &str) -> Option<String> {
             let b = parts.get(1).or_else(|| parts.first())?;
             Some(clean_filename(b))
         })
+}
+
+/// Extract mode metadata lines (old mode / new mode / new file mode / deleted file mode)
+/// from the diff header region. Returns `None` if no mode lines are present.
+fn extract_mode_lines(header: &str) -> Option<String> {
+    // Use starts_with because git mode lines always begin at column 0.
+    // contains would false-positive on filenames or other header lines.
+    let lines: Vec<&str> = header
+        .lines()
+        .filter(|l| {
+            l.starts_with("old mode")
+                || l.starts_with("new mode")
+                || l.starts_with("new file mode")
+                || l.starts_with("deleted file mode")
+        })
+        .collect();
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
+}
+
+/// Build a `DiffFile` for a section with no content hunks (binary, mode-only,
+/// or pure rename/copy). Returns `Ok(None)` if the filename cannot be extracted.
+fn build_simple_file(section: &str, header: &str) -> Result<Option<DiffFile>> {
+    let filename = match extract_filename_from_diff_git(section) {
+        Some(f) => f,
+        None => {
+            warn!(
+                header_len = header.len(),
+                "Could not extract filename from diff section — skipping"
+            );
+            return Ok(None);
+        }
+    };
+    let status = detect_status(header, None, None);
+    Ok(Some(DiffFile {
+        filename,
+        old_filename: extract_old_filename(header),
+        status,
+        hunks: Vec::new(),
+        additions: 0,
+        deletions: 0,
+        mode_change: extract_mode_lines(header),
+    }))
 }
 
 /// Split a string on spaces, treating double-quoted segments as single tokens.
