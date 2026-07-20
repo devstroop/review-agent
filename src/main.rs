@@ -22,11 +22,14 @@ enum Command {
         #[arg(long)]
         pr_url: String,
     },
-    /// Start webhook server (coming soon)
+    /// Start webhook server for real-time PR review processing
     Serve {
         /// Port to listen on
         #[arg(long, default_value = "8080")]
         port: u16,
+        /// Secret for verifying GitHub webhook signatures (optional)
+        #[arg(long, env = "WEBHOOK_SECRET")]
+        webhook_secret: Option<String>,
     },
 }
 
@@ -180,9 +183,27 @@ async fn main() -> anyhow::Result<()> {
 
             println!("Review posted for PR #{}", output.pr_number);
         }
-        Command::Serve { port } => {
-            tracing::info!(port, "Serve command (not yet implemented)");
-            println!("Webhook server stub on port {}", port);
+        Command::Serve { port, .. } => {
+            tracing::info!(port, "Starting webhook server");
+
+            let settings = review_agent::Settings::load()?;
+            tracing::info!(
+                api_base = %settings.ai.api_base,
+                model = %settings.ai.model,
+                "Settings loaded"
+            );
+
+            let app = review_agent::server::router(settings);
+            let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to bind port {}: {}", port, e))?;
+
+            tracing::info!(port, "Webhook server listening");
+            axum::serve(listener, app)
+                .await
+                .map_err(|e| anyhow::anyhow!("Server error: {}", e))?;
+
+            println!("Webhook server listening on port {}", port);
         }
     }
 

@@ -6,6 +6,7 @@ pub mod github;
 pub mod language;
 pub mod logging;
 pub mod sensitive;
+pub mod server;
 pub mod tokens;
 pub mod tools;
 
