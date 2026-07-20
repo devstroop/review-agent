@@ -32,7 +32,9 @@ pub struct ReviewOutput {
     pub files_changed: usize,
     pub files_reviewed: usize,
     pub files_skipped: usize,
-    pub total_tokens_used: usize,
+    /// Total tokens consumed (input + output), or `None` if the API did not
+    /// report output token usage.
+    pub total_tokens_used: Option<usize>,
     pub input_tokens_estimated: usize,
     pub output_tokens_reported: Option<u32>,
     pub latency_ms: u64,
@@ -115,7 +117,8 @@ impl ReviewTool {
             files_changed,
             files_reviewed,
             files_skipped,
-            total_tokens_used: input_tokens_estimated,
+            total_tokens_used: output_tokens_reported
+                .map(|t| input_tokens_estimated + t as usize),
             input_tokens_estimated,
             output_tokens_reported,
             latency_ms,
