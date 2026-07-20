@@ -162,9 +162,11 @@ impl GitHub {
     /// Perform a GET request and return the response body as a plain string.
     /// Used for fetching raw diffs with a custom Accept header.
     async fn get_with_accept(&self, url: String, accept: &str) -> Result<String> {
-        let _permit = self.semaphore.acquire().await.map_err(|e| {
-            AgentError::GitHub(format!("Semaphore acquire failed: {}", e))
-        })?;
+        let _permit = self
+            .semaphore
+            .acquire()
+            .await
+            .map_err(|e| AgentError::GitHub(format!("Semaphore acquire failed: {}", e)))?;
         self.rate_limiter.until_ready().await;
 
         let accept = accept.to_string();
@@ -207,9 +209,11 @@ impl GitHub {
 
     /// Perform a GET request and deserialize the response as JSON.
     async fn get_json<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T> {
-        let _permit = self.semaphore.acquire().await.map_err(|e| {
-            AgentError::GitHub(format!("Semaphore acquire failed: {}", e))
-        })?;
+        let _permit = self
+            .semaphore
+            .acquire()
+            .await
+            .map_err(|e| AgentError::GitHub(format!("Semaphore acquire failed: {}", e)))?;
         self.rate_limiter.until_ready().await;
 
         let url = url.to_string();
@@ -245,9 +249,11 @@ impl GitHub {
         url: &str,
         body: &B,
     ) -> Result<T> {
-        let _permit = self.semaphore.acquire().await.map_err(|e| {
-            AgentError::GitHub(format!("Semaphore acquire failed: {}", e))
-        })?;
+        let _permit = self
+            .semaphore
+            .acquire()
+            .await
+            .map_err(|e| AgentError::GitHub(format!("Semaphore acquire failed: {}", e)))?;
         self.rate_limiter.until_ready().await;
 
         let url = url.to_string();
@@ -327,7 +333,11 @@ impl GitHub {
 /// Uses the `X-RateLimit-Remaining` response header (when available) to
 /// accurately distinguish 403 rate-limit errors from 403 permission errors,
 /// rather than relying on body text matching alone (ADR-008).
-fn classify_error(status: StatusCode, body: &str, rate_limit_remaining: Option<&str>) -> AgentError {
+fn classify_error(
+    status: StatusCode,
+    body: &str,
+    rate_limit_remaining: Option<&str>,
+) -> AgentError {
     match status {
         StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
             // Prefer the X-RateLimit-Remaining header over body text for
