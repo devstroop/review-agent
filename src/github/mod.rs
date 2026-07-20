@@ -333,7 +333,11 @@ impl GitHub {
 /// Uses the `X-RateLimit-Remaining` response header (when available) to
 /// accurately distinguish 403 rate-limit errors from 403 permission errors,
 /// rather than relying on body text matching alone (ADR-008).
-fn classify_error(status: StatusCode, body: &str, rate_limit_remaining: Option<&str>) -> AgentError {
+fn classify_error(
+    status: StatusCode,
+    body: &str,
+    rate_limit_remaining: Option<&str>,
+) -> AgentError {
     match status {
         StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
             // Prefer the X-RateLimit-Remaining header over body text for
