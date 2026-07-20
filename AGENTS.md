@@ -48,7 +48,7 @@ action.yml       — GitHub Action metadata (Docker strategy) (done)
 
 ## Current State
 
-All phases complete. **113 tests pass**, 0 fail, 0 warnings (`cargo clippy -D warnings` clean).
+All phases complete. **116 tests pass**, 0 fail, 0 warnings (`cargo clippy -D warnings` clean).
 
 | Phase | What | Status |
 |-------|------|--------|
