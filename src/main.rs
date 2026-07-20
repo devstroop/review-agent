@@ -417,6 +417,30 @@ mod tests {
     }
 
     #[test]
+    fn parse_pr_url_error_messages_are_descriptive() {
+        let err = parse_pr_url("not-a-url").unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Invalid PR URL"),
+            "expected error about invalid URL, got: {msg}"
+        );
+
+        let err = parse_pr_url("https://gitlab.com/o/r/pull/1").unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Invalid PR URL"),
+            "expected error about invalid PR URL, got: {msg}"
+        );
+
+        let err = parse_pr_url("http://github.com/o/r/pull/1").unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Invalid PR URL"),
+            "expected error about invalid PR URL, got: {msg}"
+        );
+    }
+
+    #[test]
     fn parse_pr_url_case_insensitive_pull() {
         let (_owner, _repo, number) = parse_pr_url("https://github.com/o/r/Pull/1").unwrap();
         assert_eq!(number, 1);
