@@ -138,6 +138,12 @@ fn parse_single_file(section: &str) -> Result<Option<DiffFile>> {
     // ── Early returns for files without content hunks ───────────
     // Binary files, mode-only changes, and pure renames/copies all lack
     // `@@` hunk headers and must be handled before the diffy parser.
+    //
+    // Previously each path had its own inline construction of a DiffFile,
+    // and when the filename could not be extracted they fell through to
+    // diffy (which would also fail).  Now all three share build_simple_file,
+    // which returns Ok(None) when the filename is missing — a more honest
+    // outcome than silently passing garbage to diffy.
 
     // 1. Binary files.
     if section.contains("Binary files") && section.contains("differ") {
