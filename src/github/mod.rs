@@ -162,18 +162,26 @@ impl GitHub {
     /// Perform a GET request and return the response body as a plain string.
     /// Used for fetching raw diffs with a custom Accept header.
     async fn get_with_accept(&self, url: String, accept: &str) -> Result<String> {
-        let _permit = self.semaphore.acquire().await.unwrap();
+        let _permit = self.semaphore.acquire().await.map_err(|e| {
+            AgentError::GitHub(format!("Semaphore acquire failed: {}", e))
+        })?;
         self.rate_limiter.until_ready().await;
 
+        let accept = accept.to_string();
         let response = self
             .retry(move || {
                 let client = self.client.clone();
                 let url = url.clone();
-                let accept = accept.to_string();
+                let accept = accept.clone();
                 async move {
                     let resp = client
                         .get(&url)
-                        .header(ACCEPT, HeaderValue::from_str(&accept).unwrap())
+                        .header(
+                            ACCEPT,
+                            HeaderValue::from_str(&accept).map_err(|e| {
+                                AgentError::Config(format!("Invalid Accept header: {}", e))
+                            })?,
+                        )
                         .send()
                         .await?;
 
@@ -194,7 +202,9 @@ impl GitHub {
 
     /// Perform a GET request and deserialize the response as JSON.
     async fn get_json<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T> {
-        let _permit = self.semaphore.acquire().await.unwrap();
+        let _permit = self.semaphore.acquire().await.map_err(|e| {
+            AgentError::GitHub(format!("Semaphore acquire failed: {}", e))
+        })?;
         self.rate_limiter.until_ready().await;
 
         let url = url.to_string();
@@ -225,7 +235,9 @@ impl GitHub {
         url: &str,
         body: &B,
     ) -> Result<T> {
-        let _permit = self.semaphore.acquire().await.unwrap();
+        let _permit = self.semaphore.acquire().await.map_err(|e| {
+            AgentError::GitHub(format!("Semaphore acquire failed: {}", e))
+        })?;
         self.rate_limiter.until_ready().await;
 
         let url = url.to_string();
