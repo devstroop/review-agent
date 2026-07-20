@@ -275,7 +275,7 @@ impl GitHub {
                 async move {
                     let resp = client.post(&url).json(&body).send().await?;
                     let status = resp.status();
-                    if status.is_success() || status == StatusCode::OK {
+                    if status.is_success() {
                         let json = resp.json().await?;
                         Ok(json)
                     } else {
