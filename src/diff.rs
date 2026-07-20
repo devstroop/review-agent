@@ -152,9 +152,11 @@ fn parse_single_file(section: &str) -> Result<Option<DiffFile>> {
 
     // 2. Mode-only changes (e.g. chmod +x) — no hunks.
     if !has_hunks
-        && header
-            .lines()
-            .any(|l| l.starts_with("old mode") || l.starts_with("new file mode") || l.starts_with("deleted file mode"))
+        && header.lines().any(|l| {
+            l.starts_with("old mode")
+                || l.starts_with("new file mode")
+                || l.starts_with("deleted file mode")
+        })
     {
         return build_simple_file(section, header);
     }

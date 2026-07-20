@@ -117,8 +117,7 @@ impl ReviewTool {
             files_changed,
             files_reviewed,
             files_skipped,
-            total_tokens_used: output_tokens_reported
-                .map(|t| input_tokens_estimated + t as usize),
+            total_tokens_used: output_tokens_reported.map(|t| input_tokens_estimated + t as usize),
             input_tokens_estimated,
             output_tokens_reported,
             latency_ms,
@@ -266,8 +265,8 @@ fn sanitize_output(text: &str) -> String {
                 Some(ref open_delim) => {
                     let expected_count = open_delim.len();
                     let actual_count = count;
-                    let is_close = ch == open_delim.chars().next().unwrap()
-                        && actual_count >= expected_count;
+                    let is_close =
+                        ch == open_delim.chars().next().unwrap() && actual_count >= expected_count;
                     if is_close {
                         fence = None; // close the block
                     } else {
@@ -504,7 +503,10 @@ mod tests {
         assert!(result.contains("before"));
         assert!(result.contains("after"));
         assert!(result.contains("::set-output"));
-        assert!(result.contains("\x1b[31mred\x1b[0m"), "ANSI escapes inside code blocks should be preserved");
+        assert!(
+            result.contains("\x1b[31mred\x1b[0m"),
+            "ANSI escapes inside code blocks should be preserved"
+        );
     }
 
     #[test]

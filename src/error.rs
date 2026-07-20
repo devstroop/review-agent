@@ -76,7 +76,6 @@ pub enum AgentError {
     /// A TOML parse error from the `toml` crate.
     #[error("TOML parse error: {0}")]
     Toml(#[from] toml::de::Error),
-
     // (reserved for URL parse errors — currently handled via anyhow in parse_pr_url)
 }
 
