@@ -19,6 +19,216 @@ use tracing::warn;
 /// GitHub API base URL.
 const GITHUB_API_BASE: &str = "https://api.github.com";
 
+/// Parse a GitHub PR URL of the form `https://github.com/{owner}/{repo}/pull/{number}`
+/// into its components.  Also accepts `www.github.com`.
+///
+/// Extra trailing path segments (e.g. `/files`) are tolerated.
+/// Returns a descriptive error string on failure.
+pub fn parse_pr_url(url_str: &str) -> std::result::Result<(String, String, u64), String> {
+    let url_str = url_str.trim_end_matches('/');
+    let parsed = url::Url::parse(url_str).map_err(|_| {
+        format!("Invalid URL: expected https://github.com/owner/repo/pull/N, got '{url_str}'")
+    })?;
+
+    if parsed.scheme() != "https" {
+        return Err(format!(
+            "URL scheme must be https, got '{}'",
+            parsed.scheme()
+        ));
+    }
+
+    let host = parsed.host_str().unwrap_or("");
+    if !host.eq_ignore_ascii_case("github.com") && !host.eq_ignore_ascii_case("www.github.com") {
+        return Err(format!("URL host must be github.com, got '{host}'"));
+    }
+
+    // url::Url::path_segments() returns raw percent-encoded segments.
+    // The url crate does NOT automatically decode them — we decode only
+    // the owner and repo segments via percent_encoding::percent_decode_str
+    // before validation.  This prevents `%2F` from being interpreted as
+    // a path separator, which would enable path traversal in downstream
+    // API calls.
+    //
+    // Double-encoded sequences such as `%252E%252E` (which would decode to
+    // `..` after two passes) are also blocked: after a single decode they
+    // become `%2E%2E`, and `valid_segment` below rejects any segment
+    // containing `%` (which is not in the allowed alphanumeric/.-_ set).
+    // Both `..` (direct) and `%2E%2E` (after partial decode) are caught
+    // by the same check.  No need for iterative decoding or raw-segment
+    // scanning.
+    let segments: Vec<String> = parsed
+        .path_segments()
+        .map(|s| {
+            s.map(|seg| {
+                percent_encoding::percent_decode_str(seg)
+                    .decode_utf8()
+                    .map(|c| c.into_owned())
+                    .map_err(|_| format!("Path segment contains invalid UTF-8: '{seg}'"))
+            })
+            .collect::<std::result::Result<Vec<String>, String>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
+
+    // Reject URLs with too few segments or a non-"pull" third segment.
+    if segments.len() < 4 || !segments[2].eq_ignore_ascii_case("pull") {
+        return Err(format!(
+            "URL path must be /owner/repo/pull/N, got '/{}'",
+            segments.join("/")
+        ));
+    }
+
+    // Warn when extra trailing segments are present (e.g. /files, /commits).
+    if segments.len() > 4 {
+        tracing::warn!(
+            "PR URL has {} trailing path segment(s) — only the first 4 are used",
+            segments.len() - 4
+        );
+    }
+
+    // Security: The `url` crate does NOT normalise `..` path segments; it
+    // returns them verbatim.  Path traversal is prevented by the explicit
+    // `valid_segment` check below, which rejects segments containing `..`.
+
+    let number: u64 = segments[3]
+        .parse()
+        .map_err(|e| format!("Invalid PR number '{}': {e}", segments[3]))?;
+
+    // Validate owner and repo segments are safe identifiers — only
+    // alphanumeric, `.`, `_`, `-`.  This prevents path traversal in
+    // downstream API calls.  Other segments (e.g. "pull", the PR
+    // number) are validated by their own logic (case-insensitive
+    // equality for "pull", u64 parse for the number).
+    let valid_segment = |s: &str| -> bool {
+        !s.is_empty()
+            && !s.contains('/')
+            && !s.contains("..")
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+    };
+
+    if !valid_segment(&segments[0]) {
+        return Err(format!("Invalid owner '{}'", segments[0]));
+    }
+    if !valid_segment(&segments[1]) {
+        return Err(format!("Invalid repo '{}'", segments[1]));
+    }
+
+    // Security: reject `..` in any path segment to prevent path traversal.
+    // Only the owner and repo get the full character whitelist; other
+    // segments are checked only for this specific threat.
+    for seg in &segments[2..] {
+        if seg.contains("..") {
+            return Err(format!("Invalid path segment '{seg}'"));
+        }
+    }
+
+    Ok((segments[0].clone(), segments[1].clone(), number))
+}
+
+#[cfg(test)]
+mod parse_pr_url_tests {
+    use super::*;
+
+    #[test]
+    fn parse_valid_pr_url() {
+        assert_eq!(
+            parse_pr_url("https://github.com/devstroop/review-agent/pull/42").unwrap(),
+            ("devstroop".into(), "review-agent".into(), 42)
+        );
+    }
+
+    #[test]
+    fn parse_pr_url_with_trailing_slash() {
+        assert_eq!(
+            parse_pr_url("https://github.com/o/r/pull/7/").unwrap(),
+            ("o".into(), "r".into(), 7)
+        );
+    }
+
+    #[test]
+    fn parse_pr_url_with_query() {
+        let (_owner, _repo, number) =
+            parse_pr_url("https://github.com/a/b/pull/99?foo=bar").unwrap();
+        assert_eq!(number, 99);
+    }
+
+    #[test]
+    fn parse_invalid_pr_url() {
+        assert!(parse_pr_url("https://github.com/devstroop/review-agent").is_err());
+        assert!(parse_pr_url("not-a-url").is_err());
+        assert!(parse_pr_url("https://github.com/o/r/pull/abc").is_err());
+    }
+
+    #[test]
+    fn parse_pr_url_with_fragment() {
+        let (owner, repo, number) = parse_pr_url("https://github.com/o/r/pull/7#section").unwrap();
+        assert_eq!((owner.as_str(), repo.as_str(), number), ("o", "r", 7));
+    }
+
+    #[test]
+    fn parse_pr_url_extra_trailing_segments() {
+        // Extra trailing segments (e.g. /files, /commits) are tolerated.
+        let (owner, repo, number) = parse_pr_url("https://github.com/o/r/pull/123/files").unwrap();
+        assert_eq!((owner.as_str(), repo.as_str(), number), ("o", "r", 123));
+
+        let (owner, repo, number) =
+            parse_pr_url("https://github.com/o/r/pull/42/commits/abc123").unwrap();
+        assert_eq!((owner.as_str(), repo.as_str(), number), ("o", "r", 42));
+    }
+
+    #[test]
+    fn parse_pr_url_wrong_host_rejected() {
+        assert!(parse_pr_url("https://gitlab.com/o/r/pull/1").is_err());
+        assert!(parse_pr_url("https://malicious.example.com/o/r/pull/1").is_err());
+    }
+
+    #[test]
+    fn parse_pr_url_http_scheme_rejected() {
+        assert!(parse_pr_url("http://github.com/o/r/pull/1").is_err());
+    }
+
+    #[test]
+    fn parse_pr_url_case_insensitive_host() {
+        assert_eq!(parse_pr_url("https://GITHUB.COM/o/r/pull/1").unwrap().2, 1);
+        assert_eq!(parse_pr_url("https://Github.com/o/r/pull/1").unwrap().2, 1);
+    }
+
+    #[test]
+    fn parse_pr_url_www_subdomain() {
+        let (owner, repo, number) = parse_pr_url("https://www.github.com/o/r/pull/1").unwrap();
+        assert_eq!((owner.as_str(), repo.as_str(), number), ("o", "r", 1));
+    }
+
+    #[test]
+    fn parse_pr_url_percent_decoded_rejected() {
+        // Percent-decoded `/` would enable path traversal — must be rejected.
+        assert!(parse_pr_url("https://github.com/user%2Fname/repo%2Btest/pull/1").is_err());
+    }
+
+    #[test]
+    fn parse_pr_url_case_insensitive_pull() {
+        assert_eq!(parse_pr_url("https://github.com/o/r/Pull/1").unwrap().2, 1);
+        assert_eq!(parse_pr_url("https://github.com/o/r/PULL/2").unwrap().2, 2);
+        assert_eq!(parse_pr_url("https://github.com/o/r/pUlL/3").unwrap().2, 3);
+    }
+
+    #[test]
+    fn parse_pr_url_invalid_owner_rejected() {
+        assert!(parse_pr_url("https://github.com//r/pull/1").is_err());
+    }
+
+    #[test]
+    fn parse_pr_url_invalid_repo_rejected() {
+        assert!(parse_pr_url("https://github.com/o//pull/1").is_err());
+    }
+
+    #[test]
+    fn parse_pr_url_path_traversal_rejected() {
+        assert!(parse_pr_url("https://github.com/o/r/pull/1/../../leak").is_err());
+    }
+}
+
 /// Pull request review event — currently only Comment is supported.
 #[derive(Debug, Clone)]
 pub enum ReviewEvent {
@@ -27,9 +237,6 @@ pub enum ReviewEvent {
 
 impl ReviewEvent {
     fn as_str(&self) -> &'static str {
-        // Using match rather than a bare return so that adding new variants
-        // produces a compiler exhaustiveness error, reminding the developer
-        // to update this method.
         match self {
             ReviewEvent::Comment => "COMMENT",
         }

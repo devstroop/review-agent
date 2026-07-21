@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
+use review_agent::github::parse_pr_url;
 use review_agent::logging;
 use review_agent::tools::review::ReviewTool;
-use std::num::ParseIntError;
 
 #[derive(Parser)]
 #[command(name = "review-agent", version, about = "AI-powered PR review agent")]
@@ -31,6 +31,8 @@ enum Command {
         #[arg(long, env = "WEBHOOK_SECRET")]
         webhook_secret: Option<String>,
     },
+    /// Start MCP stdio server for AI agent integration
+    Mcp,
 }
 
 #[tokio::main]
@@ -39,6 +41,7 @@ async fn main() -> anyhow::Result<()> {
     logging::init(cli.verbose);
 
     match &cli.command {
+        #[allow(deprecated)]
         Command::Review { pr_url } => {
             tracing::info!(pr_url, "Review command");
             let settings = review_agent::Settings::load()?;
@@ -48,11 +51,15 @@ async fn main() -> anyhow::Result<()> {
                 "Settings loaded"
             );
 
-            let (owner, repo, number) = parse_pr_url(pr_url)?;
+            let (owner, repo, number) =
+                parse_pr_url(pr_url).map_err(|e| anyhow::anyhow!("{}", e))?;
             tracing::info!(owner, repo, number, "Parsed PR URL");
 
             let tool = ReviewTool::new(&settings)?;
             let output = tool.run(&owner, &repo, number).await?;
+
+            // Destructure before constructing closures that capture it.
+            let pr_number = output.pr_number;
 
             // Emit a step summary if running in GitHub Actions.
             // Unix: full TOCTOU-safe open with symlink-swap detection.
@@ -181,7 +188,7 @@ async fn main() -> anyhow::Result<()> {
                 write_step_summary(&mut f, &output)
             })();
 
-            println!("Review posted for PR #{}", output.pr_number);
+            println!("Review posted for PR #{}", pr_number);
         }
         Command::Serve { port, .. } => {
             tracing::info!(port, "Starting webhook server");
@@ -205,6 +212,11 @@ async fn main() -> anyhow::Result<()> {
 
             println!("Webhook server listening on port {}", port);
         }
+        Command::Mcp => {
+            tracing::info!("Starting MCP stdio server");
+            let settings = review_agent::Settings::load()?;
+            review_agent::mcp::run(&settings).await?;
+        }
     }
 
     Ok(())
@@ -225,6 +237,7 @@ fn is_safe_summary_path(canonical: &std::path::Path) -> bool {
 }
 
 /// Write the step summary rows and flush. Shared by Unix and non-Unix code paths.
+#[allow(deprecated)]
 fn write_step_summary(
     f: &mut std::fs::File,
     output: &review_agent::tools::review::ReviewOutput,
@@ -293,197 +306,4 @@ fn write_step_summary(
         tracing::warn!(error = %e, "Failed to flush step summary file");
     }
     Ok(())
-}
-
-/// Parse a GitHub PR URL of the form
-/// `https://github.com/{owner}/{repo}/pull/{number}` into its components.
-///
-/// Also accepts `www.github.com`. Uses the `url` crate for parsing so that
-/// percent-encoded path segments (e.g. `user%2Fname`) are decoded correctly.
-fn parse_pr_url(url_str: &str) -> anyhow::Result<(String, String, u64)> {
-    // Trim trailing slash before parsing — without it, path_segments() includes
-    // a trailing empty segment that breaks segment-count checks.
-    let url_str = url_str.trim_end_matches('/');
-    let parsed = url::Url::parse(url_str).map_err(|_| {
-        anyhow::anyhow!("Invalid PR URL: expected https://github.com/owner/repo/pull/N")
-    })?;
-
-    if parsed.scheme() != "https" {
-        anyhow::bail!("Invalid PR URL: expected https://github.com/owner/repo/pull/N");
-    }
-
-    let host = parsed.host_str().unwrap_or("");
-    if !host.eq_ignore_ascii_case("github.com") && !host.eq_ignore_ascii_case("www.github.com") {
-        anyhow::bail!("Invalid PR URL: expected https://github.com/owner/repo/pull/N");
-    }
-
-    // url::Url path_segments() returns raw (percent-encoded) segments.
-    // Decode each segment — reject non-UTF-8 instead of silently replacing.
-    let segments: Vec<String> = parsed
-        .path_segments()
-        .map(|s| -> anyhow::Result<Vec<String>> {
-            s.map(|seg| {
-                percent_encoding::percent_decode_str(seg)
-                    .decode_utf8()
-                    .map(|c| c.into_owned())
-                    .map_err(|_| {
-                        anyhow::anyhow!("Invalid PR URL: path segment contains non-UTF-8 bytes")
-                    })
-            })
-            .collect()
-        })
-        .transpose()?
-        .unwrap_or_default();
-    // Expected: ["owner", "repo", "pull", "number"]
-    if segments.len() != 4 || !segments[segments.len() - 2].eq_ignore_ascii_case("pull") {
-        anyhow::bail!("Invalid PR URL: expected https://github.com/owner/repo/pull/N");
-    }
-
-    let owner = segments[0].clone();
-    let repo = segments[1].clone();
-    let number: u64 = segments[3]
-        .parse()
-        .map_err(|e: ParseIntError| anyhow::anyhow!("Invalid PR number: {}", e))?;
-
-    // Validate that owner/repo are safe identifiers.  After percent-decoding,
-    // a `%2F` would produce a literal `/`, enabling path traversal in downstream
-    // API calls.  GitHub owner/repo names only allow: alphanumeric, `.`, `_`, `-`.
-    let validate_segment = |name: &str, label: &str| -> anyhow::Result<()> {
-        if name.is_empty() {
-            anyhow::bail!("{label} is empty");
-        }
-        if name.contains('/') || name.contains("..") {
-            anyhow::bail!("{label} `{name}` contains path traversal characters");
-        }
-        if !name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
-        {
-            anyhow::bail!("{label} `{name}` contains invalid characters");
-        }
-        Ok(())
-    };
-    validate_segment(&owner, "owner")?;
-    validate_segment(&repo, "repo")?;
-
-    Ok((owner, repo, number))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_valid_pr_url() {
-        let (owner, repo, number) =
-            parse_pr_url("https://github.com/devstroop/review-agent/pull/42").unwrap();
-        assert_eq!(owner, "devstroop");
-        assert_eq!(repo, "review-agent");
-        assert_eq!(number, 42);
-    }
-
-    #[test]
-    fn parse_pr_url_with_trailing_slash() {
-        let (owner, repo, number) = parse_pr_url("https://github.com/o/r/pull/7/").unwrap();
-        assert_eq!(owner, "o");
-        assert_eq!(repo, "r");
-        assert_eq!(number, 7);
-    }
-
-    #[test]
-    fn parse_pr_url_with_query() {
-        let (_owner, _repo, number) =
-            parse_pr_url("https://github.com/a/b/pull/99?foo=bar").unwrap();
-        assert_eq!(number, 99);
-    }
-
-    #[test]
-    fn parse_invalid_pr_url() {
-        assert!(parse_pr_url("https://github.com/devstroop/review-agent").is_err());
-        assert!(parse_pr_url("not-a-url").is_err());
-        assert!(parse_pr_url("https://github.com/o/r/pull/abc").is_err());
-    }
-
-    #[test]
-    fn parse_pr_url_with_fragment() {
-        let (owner, repo, number) = parse_pr_url("https://github.com/o/r/pull/7#section").unwrap();
-        assert_eq!(owner, "o");
-        assert_eq!(repo, "r");
-        assert_eq!(number, 7);
-    }
-
-    #[test]
-    fn parse_pr_url_extra_path_segments_rejected() {
-        // Extra path before owner/repo should not silently mis-parse.
-        assert!(parse_pr_url("https://github.com/base/o/r/pull/123").is_err());
-    }
-
-    #[test]
-    fn parse_pr_url_wrong_host_rejected() {
-        assert!(parse_pr_url("https://gitlab.com/o/r/pull/1").is_err());
-        assert!(parse_pr_url("https://malicious.example.com/o/r/pull/1").is_err());
-    }
-
-    #[test]
-    fn parse_pr_url_http_scheme_rejected() {
-        assert!(parse_pr_url("http://github.com/o/r/pull/1").is_err());
-    }
-
-    #[test]
-    fn parse_pr_url_case_insensitive_host() {
-        let number = parse_pr_url("https://GITHUB.COM/o/r/pull/1").unwrap().2;
-        assert_eq!(number, 1);
-        let number = parse_pr_url("https://Github.com/o/r/pull/1").unwrap().2;
-        assert_eq!(number, 1);
-    }
-
-    #[test]
-    fn parse_pr_url_www_subdomain() {
-        let (owner, repo, number) = parse_pr_url("https://www.github.com/o/r/pull/1").unwrap();
-        assert_eq!(owner, "o");
-        assert_eq!(repo, "r");
-        assert_eq!(number, 1);
-    }
-
-    #[test]
-    fn parse_pr_url_percent_decoded_rejected() {
-        // Percent-decoded `/` would enable path traversal — must be rejected.
-        assert!(parse_pr_url("https://github.com/user%2Fname/repo%2Btest/pull/1").is_err());
-    }
-
-    #[test]
-    fn parse_pr_url_error_messages_are_descriptive() {
-        let err = parse_pr_url("not-a-url").unwrap_err();
-        let msg = err.to_string();
-        assert!(
-            msg.contains("Invalid PR URL"),
-            "expected error about invalid URL, got: {msg}"
-        );
-
-        let err = parse_pr_url("https://gitlab.com/o/r/pull/1").unwrap_err();
-        let msg = err.to_string();
-        assert!(
-            msg.contains("Invalid PR URL"),
-            "expected error about invalid PR URL, got: {msg}"
-        );
-
-        let err = parse_pr_url("http://github.com/o/r/pull/1").unwrap_err();
-        let msg = err.to_string();
-        assert!(
-            msg.contains("Invalid PR URL"),
-            "expected error about invalid PR URL, got: {msg}"
-        );
-    }
-
-    #[test]
-    fn parse_pr_url_case_insensitive_pull() {
-        let (_owner, _repo, number) = parse_pr_url("https://github.com/o/r/Pull/1").unwrap();
-        assert_eq!(number, 1);
-
-        let number = parse_pr_url("https://github.com/o/r/PULL/2").unwrap().2;
-        assert_eq!(number, 2);
-
-        let number = parse_pr_url("https://github.com/o/r/pUlL/3").unwrap().2;
-        assert_eq!(number, 3);
-    }
 }
