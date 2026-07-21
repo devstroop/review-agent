@@ -16,7 +16,7 @@ toml = "0.8"
 shellexpand = "3"
 
 # Async runtime
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "io-std", "io-util"] }
 
 # HTTP
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
