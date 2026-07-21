@@ -31,6 +31,8 @@ enum Command {
         #[arg(long, env = "WEBHOOK_SECRET")]
         webhook_secret: Option<String>,
     },
+    /// Start MCP stdio server for AI agent integration
+    Mcp,
 }
 
 #[tokio::main]
@@ -39,6 +41,7 @@ async fn main() -> anyhow::Result<()> {
     logging::init(cli.verbose);
 
     match &cli.command {
+        #[allow(deprecated)]
         Command::Review { pr_url } => {
             tracing::info!(pr_url, "Review command");
             let settings = review_agent::Settings::load()?;
@@ -209,6 +212,11 @@ async fn main() -> anyhow::Result<()> {
 
             println!("Webhook server listening on port {}", port);
         }
+        Command::Mcp => {
+            tracing::info!("Starting MCP stdio server");
+            let settings = review_agent::Settings::load()?;
+            review_agent::mcp::run(&settings).await?;
+        }
     }
 
     Ok(())
@@ -229,6 +237,7 @@ fn is_safe_summary_path(canonical: &std::path::Path) -> bool {
 }
 
 /// Write the step summary rows and flush. Shared by Unix and non-Unix code paths.
+#[allow(deprecated)]
 fn write_step_summary(
     f: &mut std::fs::File,
     output: &review_agent::tools::review::ReviewOutput,

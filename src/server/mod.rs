@@ -169,6 +169,7 @@ async fn handle_webhook(
 }
 
 /// Run the full review pipeline for a pull request.
+#[allow(deprecated)]
 async fn run_review(
     settings: &Settings,
     owner: &str,

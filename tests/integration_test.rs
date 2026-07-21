@@ -8,6 +8,10 @@
 //!
 //! | Test | What it covers |
 //! |------|----------------|
+
+// Allow deprecated ReviewOutput — these tests exercise the backward-compatible
+// wrapper.  New integration tests should use ReviewEngine directly.
+#![allow(deprecated)]
 //! | `full_pipeline_happy_path` | The complete fetch→parse→filter→prompt→AI→post flow |
 //! | `empty_diff` | PR with no file changes returns gracefully |
 //! | `token_budget_truncation` | Large diff is trimmed to fit max_input_tokens |
