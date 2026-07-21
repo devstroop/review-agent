@@ -9,7 +9,8 @@ pub struct PullRequest {
     pub body: Option<String>,
     pub html_url: String,
     pub state: String,
-    pub user: GitHubUser,
+    #[serde(default)]
+    pub user: Option<GitHubUser>,
     pub head: PrBranch,
     pub base: PrBranch,
     pub merged: Option<bool>,
@@ -77,7 +78,8 @@ pub struct Comment {
     pub id: u64,
     pub body: Option<String>,
     pub html_url: String,
-    pub user: GitHubUser,
+    #[serde(default)]
+    pub user: Option<GitHubUser>,
 }
 
 /// Language breakdown for a repository.
